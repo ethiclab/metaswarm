@@ -18,6 +18,7 @@ ADAPTERS_DIR="${REPO_ROOT}/skills/external-tools/adapters"
 COMMON_SH="${ADAPTERS_DIR}/_common.sh"
 CODEX_SH="${ADAPTERS_DIR}/codex.sh"
 GEMINI_SH="${ADAPTERS_DIR}/gemini.sh"
+OPENCODE_SH="${ADAPTERS_DIR}/opencode.sh"
 
 PASS_COUNT=0
 FAIL_COUNT=0
@@ -146,13 +147,45 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 4. File existence checks
+# 4. opencode.sh tests
+# ---------------------------------------------------------------------------
+printf '\n=== opencode.sh ===\n'
+
+# Syntax check
+check "opencode.sh syntax" bash -n "$OPENCODE_SH"
+
+# Health produces valid JSON
+HEALTH_JSON="$(bash "$OPENCODE_SH" health 2>/dev/null || true)"
+if printf '%s' "$HEALTH_JSON" | jq . >/dev/null 2>&1; then
+  pass "opencode.sh health produces valid JSON"
+else
+  fail "opencode.sh health does not produce valid JSON"
+fi
+
+# Health JSON contains required keys
+if printf '%s' "$HEALTH_JSON" | jq -e '.tool and .status and .model' >/dev/null 2>&1; then
+  pass "opencode.sh health JSON has required keys (tool, status, model)"
+else
+  fail "opencode.sh health JSON missing required keys"
+fi
+
+# extract_cost_opencode helper
+COST_JSON="$(bash -c "source '$COMMON_SH' && extract_cost_opencode ''")"
+if printf '%s' "$COST_JSON" | jq -e '.input_tokens and .output_tokens' >/dev/null 2>&1; then
+  pass "extract_cost_opencode produces valid cost JSON"
+else
+  fail "extract_cost_opencode does not produce valid cost JSON"
+fi
+
+# ---------------------------------------------------------------------------
+# 5. File existence checks
 # ---------------------------------------------------------------------------
 printf '\n=== File existence ===\n'
 
 check "templates/external-tools.yaml exists" test -f "${REPO_ROOT}/templates/external-tools.yaml"
 check "skills/external-tools/SKILL.md exists" test -f "${REPO_ROOT}/skills/external-tools/SKILL.md"
 check "rubrics/external-tool-review-rubric.md exists" test -f "${REPO_ROOT}/rubrics/external-tool-review-rubric.md"
+check "adapters/opencode.sh exists" test -f "${OPENCODE_SH}"
 
 # ---------------------------------------------------------------------------
 # Summary

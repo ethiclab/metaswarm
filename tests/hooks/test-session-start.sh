@@ -154,6 +154,17 @@ output=$(cd "$TEST_CWD" && bash "$HOOK_SCRIPT" 2>/dev/null || true)
 assert_json_valid "Output is valid JSON" "$output"
 assert_contains "Contains Claude migrate message" "$output" '/migrate'
 
+# --- Test 3b: OpenCode legacy install uses setup --opencode as migrate ---
+echo "Test 3b: OpenCode legacy install migrate message"
+TEST_CWD="$TMPDIR_BASE/test3b"
+mkdir -p "$TEST_CWD/.claude/plugins/metaswarm/.claude-plugin"
+echo '{"name":"metaswarm","version":"0.8.0"}' > "$TEST_CWD/.claude/plugins/metaswarm/.claude-plugin/plugin.json"
+mkdir -p "$TEST_CWD/.metaswarm"
+echo '{"distribution":"npm"}' > "$TEST_CWD/.metaswarm/project-profile.json"
+output=$(cd "$TEST_CWD" && METASWARM_PLATFORM=opencode bash "$HOOK_SCRIPT" 2>/dev/null || true)
+assert_json_valid "Output is valid JSON" "$output"
+assert_contains "Contains OpenCode migrate message" "$output" 'npx metaswarm setup --opencode'
+
 # --- Test 4: BEADS dedup detection ---
 echo "Test 4: BEADS dedup detection"
 TEST_CWD="$TMPDIR_BASE/test4"

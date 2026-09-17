@@ -37,3 +37,9 @@ jobs:
 
       - name: Verify co-located resources are in sync
         run: node lib/sync-resources.js --check
+
+      - name: Run OpenCode smoke tests
+        run: bash tests/test-opencode-smoke.sh
+
+      - name: Verify test coverage thresholds
+        run: npm run test:coverage
