@@ -25,8 +25,9 @@ This skill delegates implementation and review tasks to external AI CLI tools (O
 |------|---------|------|
 | OpenAI Codex CLI | `npm i -g @openai/codex` | API key or ChatGPT subscription |
 | Google Gemini CLI | `npm i -g @google/gemini-cli` | Google login (free 1K req/day) or API key |
+| OpenCode CLI | `curl -fsSL https://opencode.ai/install \| bash` | `opencode auth login` (OpenCode Zen) or API keys |
 
-Neither tool is strictly required. The skill adapts based on what is available (see Escalation Model below).
+None of the tools are strictly required. The skill adapts based on what is available (see Escalation Model below).
 
 ### Configuration
 
@@ -44,10 +45,15 @@ adapters:
     model: "pro"
     timeout_seconds: 300
     sandbox: docker
+  opencode:
+    enabled: true
+    model: "opencode/deepseek-v4-flash"   # provider/model format
+    timeout_seconds: 300
+    sandbox: none
 
 routing:
   default_implementer: "cheapest-available"
-  escalation_order: ["codex", "gemini", "claude"]
+  escalation_order: ["codex", "gemini", "opencode", "claude"]
 
 budget:
   per_task_usd: 2.00        # circuit breaker per task
@@ -56,8 +62,7 @@ budget:
 
 ### Fallback Behavior
 
-- **Both tools available**: Full cross-model delegation and review
-- **One tool available**: Reduced chain with mutual review between the tool and Claude
+- **Any tool available**: Full cross-model delegation and review using the available tool(s)
 - **No tools available**: Existing metaswarm behavior unchanged; skill is a no-op
 
 ---
@@ -72,6 +77,9 @@ adapters/codex.sh health
 
 # Check Gemini
 adapters/gemini.sh health
+
+# Check OpenCode
+adapters/opencode.sh health
 ```
 
 Returns JSON with `status: "ready|degraded|unavailable"`.

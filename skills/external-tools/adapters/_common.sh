@@ -427,6 +427,41 @@ extract_cost_gemini() {
 }
 
 # ---------------------------------------------------------------------------
+# extract_cost_opencode()
+#   Parse OpenCode JSONL events for token counts.
+#   Usage: extract_cost_opencode <jsonl_file>
+#   Returns JSON object: {"input_tokens": N, "output_tokens": N}
+#   OpenCode emits step_finish events with part.tokens:
+#     {"type":"step_finish","part":{"type":"step-finish","tokens":{"input":N,"output":N,...}}}
+# ---------------------------------------------------------------------------
+extract_cost_opencode() {
+  local jsonl_file="${1:-}"
+
+  if [[ -z "$jsonl_file" || ! -f "$jsonl_file" ]]; then
+    printf '{"input_tokens": 0, "output_tokens": 0}'
+    return 0
+  fi
+
+  if ! command -v jq >/dev/null 2>&1; then
+    printf '{"input_tokens": 0, "output_tokens": 0}'
+    return 0
+  fi
+
+  local usage
+  usage="$(jq -s '
+    [ .[] | select(.type == "step_finish") | .part.tokens? // empty ] |
+    if length > 0 then
+      { input_tokens: (map(.input // 0) | add),
+        output_tokens: (map(.output // 0) | add) }
+    else
+      { input_tokens: 0, output_tokens: 0 }
+    end
+  ' "$jsonl_file" 2>/dev/null || printf '{"input_tokens": 0, "output_tokens": 0}')"
+
+  printf '%s' "$usage"
+}
+
+# ---------------------------------------------------------------------------
 # emit_json()
 #   Emit structured JSON output to stdout.
 #   Usage: emit_json <tool> <command> <model> <attempt> <exit_code> \

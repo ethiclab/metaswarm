@@ -1,7 +1,7 @@
 {
   "name": "metaswarm",
   "version": "0.12.0",
-  "description": "Cross-platform installer for metaswarm — multi-agent orchestration for Claude Code, Codex CLI, and Gemini CLI",
+  "description": "Cross-platform installer for metaswarm — multi-agent orchestration for Claude Code, Codex CLI, Gemini CLI, and OpenCode",
   "bin": {
     "metaswarm": "cli/metaswarm.js"
   },
@@ -27,6 +27,7 @@
     "claude-code",
     "codex-cli",
     "gemini-cli",
+    "opencode",
     "agents",
     "orchestration",
     "tdd",
@@ -39,5 +40,10 @@
   },
   "engines": {
     "node": ">=18"
+  },
+  "scripts": {
+    "test": "bash tests/test-opencode-smoke.sh",
+    "test:coverage": "bash scripts/verify-coverage.sh",
+    "test:ci": "bash tests/test-opencode-smoke.sh"
   }
 }

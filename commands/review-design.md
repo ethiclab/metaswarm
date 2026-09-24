@@ -2,6 +2,25 @@
 
 Run the design review gate on a design document to get feedback from Product Manager, Architect, Designer, Security Design, and CTO agents.
 
+## Execution (OpenCode) — READ FIRST
+
+MANDATORY: spawn FIVE separate `task` tool calls, one per reviewer, BEFORE
+writing any verdict. Do NOT aggregate reviews yourself and do NOT reuse a
+single agent for multiple roles.
+
+| Reviewer | task tool subagent name |
+|----------|------------------------|
+| Product Manager | `product-manager-agent` |
+| Architect | `architect-agent` |
+| Designer | `designer-agent` |
+| Security Design | `security-design-agent` |
+| CTO | `cto-agent` |
+
+Pass the design document path and the review focus (from the "Agent Details"
+sections below) in each task prompt. Respect `--skip-agent` by omitting that
+agent's task call. Wait for all five task calls to complete, then aggregate
+the verdicts as described in "Review Verdicts".
+
 ## Usage
 
 ```bash

@@ -3,7 +3,7 @@
 # Writes the 3 mandatory setup files that the agent keeps skipping.
 # Called by the setup skill after detection and user questions.
 #
-# Usage: setup-mandatory-files.sh <project-dir> <coverage-threshold> <coverage-command> [--platform claude|codex|gemini|all]
+# Usage: setup-mandatory-files.sh <project-dir> <coverage-threshold> <coverage-command> [--platform claude|codex|gemini|opencode|all]
 #
 # Arguments:
 #   project-dir       - Project root directory
@@ -28,7 +28,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --platform)
       if [ $# -lt 2 ]; then
-        echo "Error: --platform requires a value (claude, codex, gemini, or all)" >&2
+        echo "Error: --platform requires a value (claude, codex, gemini, opencode, or all)" >&2
         exit 1
       fi
       PLATFORM="$2"; shift 2 ;;
@@ -75,6 +75,110 @@ write_instruction_file() {
   fi
 }
 
+# Helper: copy a file only when the destination does not already exist,
+# preserving local edits when the script is re-run on existing projects.
+copy_if_missing() {
+  local src="$1" dest="$2" label="$3"
+  if [ ! -f "$src" ]; then
+    errors+=("${label} — source not found at $src")
+    return 0
+  fi
+  if [ -f "$dest" ]; then
+    skipped+=("${label} (already exists)")
+  else
+    cp "$src" "$dest"
+    created+=("${label}")
+  fi
+}
+
+# Helper: write the OpenCode integration files (copy-only-when-missing).
+write_opencode_files() {
+  mkdir -p "$PROJECT_DIR/.opencode/commands" "$PROJECT_DIR/.opencode/agents"
+  if [ ! -f "$PROJECT_DIR/opencode.json" ]; then
+    copy_if_missing "$TEMPLATE_DIR/opencode.json" \
+      "$PROJECT_DIR/opencode.json" "opencode.json"
+  elif command -v node >/dev/null 2>&1; then
+    # Additive upgrade: merge template commands/agents into the existing
+    # config (adds missing entries, refreshes standard file targets,
+    # preserves user-custom entries).
+    node -e '
+      const fs = require("fs");
+      const [tplPath, cfgPath] = process.argv.slice(1);
+      const existing = JSON.parse(fs.readFileSync(cfgPath, "utf-8"));
+      const templ = JSON.parse(fs.readFileSync(tplPath, "utf-8"));
+      let added = 0, updated = 0;
+      for (const section of ["command", "agent"]) {
+        if (!existing[section]) existing[section] = {};
+        if (!templ[section]) continue;
+        for (const [name, def] of Object.entries(templ[section])) {
+          if (!existing[section][name]) {
+            existing[section][name] = def;
+            added++;
+          } else {
+            const cur = existing[section][name];
+            const isStandard = section === "command"
+              ? /^\{file:\.opencode\/commands\/[a-z0-9-]+\.md\}$/.test(cur.template || "")
+              : /^\{file:\.opencode\/agents\/[a-z0-9-]+\.md\}$/.test(cur.prompt || "");
+            if (isStandard) {
+              let changed = false;
+              if (cur.template && cur.template !== def.template) { cur.template = def.template; changed = true; }
+              if (cur.prompt && cur.prompt !== def.prompt) { cur.prompt = def.prompt; changed = true; }
+              if (changed) updated++;
+            }
+          }
+        }
+      }
+      if (added > 0 || updated > 0) {
+        fs.writeFileSync(cfgPath, JSON.stringify(existing, null, 2) + "\n", "utf-8");
+        console.log(`opencode.json (upgraded: +${added} added, ${updated} refreshed)`);
+      } else {
+        console.log("opencode.json (up to date)");
+      }
+    ' "$TEMPLATE_DIR/opencode.json" "$PROJECT_DIR/opencode.json"
+    result="$?"
+    if [ "$result" -eq 0 ]; then
+      created+=("opencode.json (additive merge)")
+    else
+      skipped+=("opencode.json (merge failed, keeping existing)")
+    fi
+  else
+    skipped+=("opencode.json (exists; node required for upgrade)")
+  fi
+  for cmd in setup start-task prime review-design design-review-gate orchestrated-execution self-reflect handoff pr-shepherd brainstorm update status handle-pr-comments create-issue external-tools-health; do
+    copy_if_missing "$PLUGIN_ROOT/commands/${cmd}.md" \
+      "$PROJECT_DIR/.opencode/commands/${cmd}.md" ".opencode/commands/${cmd}.md"
+  done
+  for agent in issue-orchestrator architect-agent product-manager-agent designer-agent security-design-agent cto-agent coder-agent code-review-agent researcher-agent test-automator-agent security-auditor-agent knowledge-curator-agent pr-shepherd-agent release-engineer-agent sre-agent customer-service-agent metrics-agent swarm-coordinator-agent slack-coordinator-agent; do
+    copy_if_missing "$PLUGIN_ROOT/agents/${agent}.md" \
+      "$PROJECT_DIR/.opencode/agents/${agent}.md" ".opencode/agents/${agent}.md"
+  done
+  copy_if_missing "$TEMPLATE_DIR/OPENCODE.md" \
+    "$PROJECT_DIR/.opencode/OPENCODE.md" ".opencode/OPENCODE.md"
+  # Session hook plugin (BEADS state preservation + setup warnings)
+  if [ -d "$PLUGIN_ROOT/.opencode/plugins" ]; then
+    mkdir -p "$PROJECT_DIR/.opencode/plugins"
+    for plugin_file in "$PLUGIN_ROOT"/.opencode/plugins/*; do
+      [ -f "$plugin_file" ] || continue
+      copy_if_missing "$plugin_file" \
+        "$PROJECT_DIR/.opencode/plugins/$(basename "$plugin_file")" \
+        ".opencode/plugins/$(basename "$plugin_file")"
+    done
+  fi
+  # Skill definitions (SKILL.md discovery via .opencode/skills/<name>/)
+  mkdir -p "$PROJECT_DIR/.opencode/skills"
+  for skill_dir in "$PLUGIN_ROOT"/skills/*/; do
+    [ -d "$skill_dir" ] || continue
+    [ -f "$skill_dir/SKILL.md" ] || continue
+    skill_name="$(basename "$skill_dir")"
+    if [ ! -d "$PROJECT_DIR/.opencode/skills/$skill_name" ]; then
+      cp -R "$skill_dir" "$PROJECT_DIR/.opencode/skills/$skill_name"
+      created+=(".opencode/skills/${skill_name}/")
+    else
+      skipped+=(".opencode/skills/${skill_name}/")
+    fi
+  done
+}
+
 # --- File 1: Instruction file(s) based on platform ---
 case "$PLATFORM" in
   claude)
@@ -86,13 +190,17 @@ case "$PLATFORM" in
   gemini)
     write_instruction_file "gemini" "GEMINI.md" "$TEMPLATE_DIR/GEMINI-append.md" "$TEMPLATE_DIR/GEMINI.md"
     ;;
+  opencode)
+    write_opencode_files
+    ;;
   all)
     write_instruction_file "claude" "CLAUDE.md" "$TEMPLATE_DIR/CLAUDE-append.md" "$TEMPLATE_DIR/CLAUDE.md"
     write_instruction_file "codex" "AGENTS.md" "$TEMPLATE_DIR/AGENTS-append.md" "$TEMPLATE_DIR/AGENTS.md"
     write_instruction_file "gemini" "GEMINI.md" "$TEMPLATE_DIR/GEMINI-append.md" "$TEMPLATE_DIR/GEMINI.md"
+    write_opencode_files
     ;;
   *)
-    errors+=("Unknown platform: $PLATFORM (expected: claude, codex, gemini, or all)")
+    errors+=("Unknown platform: $PLATFORM (expected: claude, codex, gemini, opencode, or all)")
     ;;
 esac
 

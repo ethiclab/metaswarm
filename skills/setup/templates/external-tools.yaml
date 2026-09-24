@@ -15,6 +15,12 @@ adapters:
     timeout_seconds: 300
     sandbox: none
     auth_env_var: "GEMINI_API_KEY"   # Or use Google login (no key needed)
+  opencode:
+    enabled: true
+    model: "opencode/deepseek-v4-flash"   # provider/model format
+    timeout_seconds: 300
+    sandbox: none
+    auth_env_var: "OPENCODE_AUTH_FILE"    # Or use the default opencode auth.json
 
 routing:
   # How to pick the implementer for a task:
@@ -24,7 +30,7 @@ routing:
   default_implementer: "cheapest-available"
 
   # Order for escalation when a tool fails after max retries
-  escalation_order: ["codex", "gemini", "claude"]
+  escalation_order: ["codex", "gemini", "opencode", "claude"]
 
 budget:
   per_task_usd: 2.00               # Circuit breaker: max spend per task before user alert

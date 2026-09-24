@@ -1,6 +1,6 @@
 # External Tools Health Check
 
-Check the status of external AI tools (Codex CLI, Gemini CLI) and their configuration.
+Check the status of external AI tools (Codex CLI, Gemini CLI, OpenCode CLI) and their configuration.
 
 ## Usage
 
@@ -14,6 +14,7 @@ Check the status of external AI tools (Codex CLI, Gemini CLI) and their configur
    ```bash
    command -v codex >/dev/null 2>&1 && echo "codex: available" || echo "codex: not found"
    command -v gemini >/dev/null 2>&1 && echo "gemini: available" || echo "gemini: not found"
+   command -v opencode >/dev/null 2>&1 && echo "opencode: available" || echo "opencode: not found"
    ```
 
 2. **Check configuration**: Read `.metaswarm/external-tools.yaml` if it exists. Report which adapters are enabled/disabled.
