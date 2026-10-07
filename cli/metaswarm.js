@@ -323,6 +323,7 @@ metaswarm v${VERSION} — Cross-platform installer
 Usage:
   metaswarm init [flags]        Install metaswarm for detected CLI tools
   metaswarm setup [flags]       Set up metaswarm in the current project
+  metaswarm update [flags]      Update project files from latest templates
   metaswarm detect              Show which CLI tools are installed
   metaswarm --help              Show this help
   metaswarm --version           Show version
@@ -342,11 +343,24 @@ Setup flags:
   --all               Write configs for all platforms
   (no flag)           Auto-detect installed CLIs
 
+Update flags:
+  --claude            Update CLAUDE.md only
+  --codex             Update AGENTS.md only
+  --gemini            Update GEMINI.md only
+  --opencode          Update opencode.json, commands, agents, OPENCODE.md
+  --all               Update configs for all platforms
+  --dry-run           Show what would change without modifying files
+  --force             Force update all files without prompting (non-interactive)
+  (no flag)           Auto-detect installed CLIs
+
 Examples:
   npx metaswarm init            Auto-detect and install for all CLIs
   npx metaswarm init --codex    Install for Codex CLI only
   npx metaswarm setup           Set up project for detected CLIs
   npx metaswarm setup --opencode  Set up project for OpenCode only
+  npx metaswarm update          Update project for detected CLIs
+  npx metaswarm update --opencode  Update OpenCode project files
+  npx metaswarm update --dry-run  Preview changes without applying
   npx metaswarm detect          Show which CLIs are available
 `);
 }
@@ -409,6 +423,60 @@ function detectCommand() {
   console.log('');
 }
 
+// --- Update project ---
+
+function updateProject(platformFlag, dryRun, force) {
+  console.log(`\nmetaswarm v${VERSION} — project update\n`);
+  
+  const platforms = detectPlatforms();
+  const targetPlatforms = [];
+  
+  if (platformFlag === 'all') {
+    targetPlatforms.push('claude', 'codex', 'gemini', 'opencode');
+  } else if (!platformFlag) {
+    for (const [key, p] of Object.entries(platforms)) {
+      if (p.installed) targetPlatforms.push(key);
+    }
+    if (targetPlatforms.length === 0) {
+      targetPlatforms.push('claude');
+    }
+  } else {
+    targetPlatforms.push(platformFlag);
+  }
+  
+  console.log(`  Updating for: ${targetPlatforms.join(', ')}`);
+  if (dryRun) console.log('  Mode: DRY RUN (no changes will be made)');
+  if (force) console.log('  Mode: FORCE (auto-update all files)');
+  console.log('');
+  
+  const updateScript = path.join(PKG_ROOT, 'lib', 'update-project-files.sh');
+  
+  if (!fs.existsSync(updateScript)) {
+    console.error('  Error: update script not found at', updateScript);
+    process.exit(1);
+  }
+  
+  for (const plat of targetPlatforms) {
+    const args = [updateScript, CWD, '--platform', plat];
+    if (dryRun) args.push('--dry-run');
+    if (force) args.push('--force');
+    
+    try {
+      const result = execSync(args.join(' '), { 
+        encoding: 'utf-8', 
+        stdio: ['ignore', 'pipe', 'pipe'] 
+      });
+      console.log(result);
+    } catch (e) {
+      if (e.stdout) console.log(e.stdout);
+      if (e.stderr) console.error(e.stderr);
+      console.error(`  Failed to update for ${plat}: ${e.message}`);
+    }
+  }
+  
+  console.log('\n  Update complete!');
+}
+
 // --- Main ---
 
 const args = process.argv.slice(2);
@@ -425,6 +493,17 @@ if (cmd === 'init') {
   else if (flags.has('--opencode')) platformFlag = 'opencode';
   else if (flags.has('--all')) platformFlag = 'all';
   setupProject(platformFlag);
+} else if (cmd === 'update') {
+  const flags = new Set(args.slice(1));
+  let platformFlag = null;
+  if (flags.has('--claude')) platformFlag = 'claude';
+  else if (flags.has('--codex')) platformFlag = 'codex';
+  else if (flags.has('--gemini')) platformFlag = 'gemini';
+  else if (flags.has('--opencode')) platformFlag = 'opencode';
+  else if (flags.has('--all')) platformFlag = 'all';
+  const dryRun = flags.has('--dry-run');
+  const force = flags.has('--force');
+  updateProject(platformFlag, dryRun, force);
 } else if (cmd === 'detect') {
   detectCommand();
 } else if (cmd === '--version' || cmd === '-v') {
