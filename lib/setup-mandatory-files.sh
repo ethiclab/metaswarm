@@ -93,9 +93,14 @@ copy_if_missing() {
 
 # Helper: write the OpenCode integration files (copy-only-when-missing).
 write_opencode_files() {
-  mkdir -p "$PROJECT_DIR/.opencode/commands" "$PROJECT_DIR/.opencode/agents"
+  mkdir -p "$PROJECT_DIR/.opencode/commands" "$PROJECT_DIR/.opencode/agents" \
+    "$PROJECT_DIR/.opencode/plugins" "$PROJECT_DIR/scripts"
   copy_if_missing "$TEMPLATE_DIR/opencode.json" \
     "$PROJECT_DIR/opencode.json" "opencode.json"
+  copy_if_missing "$TEMPLATE_DIR/metaswarm-session.js" \
+    "$PROJECT_DIR/.opencode/plugins/metaswarm-session.js" ".opencode/plugins/metaswarm-session.js"
+  copy_if_missing "$PLUGIN_ROOT/scripts/beads-mcp-server.ts" \
+    "$PROJECT_DIR/scripts/beads-mcp-server.ts" "scripts/beads-mcp-server.ts"
   for cmd in setup start-task prime review-design design-review-gate orchestrated-execution; do
     copy_if_missing "$PLUGIN_ROOT/commands/${cmd}.md" \
       "$PROJECT_DIR/.opencode/commands/${cmd}.md" ".opencode/commands/${cmd}.md"

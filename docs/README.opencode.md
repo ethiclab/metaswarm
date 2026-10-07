@@ -6,8 +6,8 @@
 
 ### Prerequisites
 
-- [OpenCode CLI](https://opencode.ai) v1.17.11 or later (`opencode --version`)
-- Node.js >= 18
+- [OpenCode CLI](https://opencode.ai) v2 (OpenCode V1 plugin API is not supported)
+- Node.js >= 22.18 (the BEADS MCP server runs with plain `node`; older Node.js can use `npx tsx`)
 
 ### Install MetaSwarm
 
@@ -33,10 +33,12 @@ This generates:
 
 | File | Purpose |
 |------|---------|
-| `opencode.json` | OpenCode configuration registering commands and agents |
+| `opencode.json` | OpenCode configuration registering commands, agents, and the BEADS MCP server |
 | `.opencode/commands/` | Command templates referenced by `{file:...}` in the config |
 | `.opencode/agents/` | Agent prompts referenced by `{file:...}` in the config |
 | `.opencode/OPENCODE.md` | Project instructions (loaded via `instructions` field) |
+| `.opencode/plugins/metaswarm-session.js` | Session plugin: setup verification, BEADS state on compaction |
+| `scripts/beads-mcp-server.ts` | BEADS MCP server (zero dependencies, started by `mcp.servers.beads`) |
 
 ## Workflow
 
@@ -74,9 +76,10 @@ This integration is a Proof-of-Concept. The following table shows what's include
 |------|----------|----------|
 | Commands | start-task, prime, review-design (3 of 13) | self-reflect, handoff, pr-shepherd, brainstorm, setup, update, status, handle-pr-comments, create-issue, external-tools-health |
 | Agents | issue-orchestrator, architect-agent (2 of 19) | 17 remaining agents |
-| Plugin hooks | none | BEADS integration, session events, compacting hook |
+| Plugin hooks | `.opencode/plugins/metaswarm-session.js` — setup verification, BEADS state injected on compaction (OpenCode V2 plugin API) | session events beyond setup and compaction |
+| BEADS MCP | `scripts/beads-mcp-server.ts` (zero-dependency stdio server) wired via `mcp.servers.beads` | — |
 | Skills discovery | none | `skill` tool wiring via `.opencode/plugins` |
-| `.opencode/` structure | commands/, agents/ | plugins/, hooks/ |
+| `.opencode/` structure | commands/, agents/, plugins/ | hooks/ |
 
 ## Comparison with Other Platforms
 
@@ -101,7 +104,6 @@ bash tests/test-opencode-smoke.sh
 
 ## Future Work
 
-- Add `.opencode/plugins/*.ts` for BEADS integration
-- Wire `experimental.session.compacting` hook for session management
+- Extend the session plugin with session events beyond setup verification and compaction
 - Register remaining commands and agents
 - Add OpenCode to the hub-and-spoke sync-resources validation pipeline

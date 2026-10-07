@@ -28,6 +28,7 @@ This generates `opencode.json` and copies the referenced command and agent files
 |------|-------|-------|
 | Commands | 3 | start-task, prime, review-design |
 | Agents | 2 | issue-orchestrator, architect-agent |
+| Plugins | 1 | metaswarm-session (OpenCode V2: setup verification + BEADS state on compaction) |
 
 ## POC Scope
 
@@ -36,9 +37,7 @@ Remaining items will be added incrementally in follow-up PRs.
 
 ### Deferred to Follow-up PRs
 
-- BEADS integration via `.opencode/plugins`
-- Session hooks (`experimental.session.compacting`, session events)
+- Session events beyond setup verification and compaction
 - Skills discovery (`skill` tool wiring)
-- `.opencode/plugins/*.ts` plugin system
 - Full command roster (remaining 10 commands)
 - Full agent roster (remaining 17 agents)

@@ -231,6 +231,38 @@ function setupOpenCode() {
   } else {
     skip('.opencode/OPENCODE.md');
   }
+
+  // 5. Session plugin (OpenCode V2 plugin API: default export with id + setup)
+  const pluginsDir = path.join(opencodeDir, 'plugins');
+  mkdirp(pluginsDir);
+  const pluginTemplate = path.join(PKG_ROOT, 'templates', 'metaswarm-session.js');
+  const pluginPath = path.join(pluginsDir, 'metaswarm-session.js');
+  if (!fs.existsSync(pluginPath)) {
+    if (fs.existsSync(pluginTemplate)) {
+      fs.copyFileSync(pluginTemplate, pluginPath);
+      info('.opencode/plugins/metaswarm-session.js (written from template)');
+    } else {
+      warn('metaswarm-session.js template not found');
+    }
+  } else {
+    skip('.opencode/plugins/metaswarm-session.js');
+  }
+
+  // 6. BEADS MCP server (referenced by mcp.servers.beads in opencode.json)
+  const scriptsDir = path.join(CWD, 'scripts');
+  mkdirp(scriptsDir);
+  const mcpTemplate = path.join(PKG_ROOT, 'scripts', 'beads-mcp-server.ts');
+  const mcpPath = path.join(scriptsDir, 'beads-mcp-server.ts');
+  if (!fs.existsSync(mcpPath)) {
+    if (fs.existsSync(mcpTemplate)) {
+      fs.copyFileSync(mcpTemplate, mcpPath);
+      info('scripts/beads-mcp-server.ts (written from package)');
+    } else {
+      warn('scripts/beads-mcp-server.ts not found');
+    }
+  } else {
+    skip('scripts/beads-mcp-server.ts');
+  }
 }
 
 // --- Project-level setup ---

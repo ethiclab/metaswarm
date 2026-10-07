@@ -6,12 +6,14 @@
     "urls": []
   },
   "mcp": {
-    "beads": {
-      "type": "local",
-      "command": ["npx", "tsx", "scripts/beads-mcp-server.ts"],
-      "cwd": "${workspace}",
-      "enabled": true,
-      "timeout": 30000
+    "servers": {
+      "beads": {
+        "type": "local",
+        "command": ["node", "scripts/beads-mcp-server.ts"],
+        "timeout": {
+          "catalog": 30000
+        }
+      }
     }
   },
   "compaction": {

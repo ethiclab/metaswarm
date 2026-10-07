@@ -154,6 +154,18 @@ update_opencode() {
     "$TEMPLATE_DIR/OPENCODE.md" \
     "$PROJECT_DIR/.opencode/OPENCODE.md" \
     ".opencode/OPENCODE.md"
+
+  # Session plugin - framework-owned, OpenCode V2 plugin API
+  update_with_prompt \
+    "$TEMPLATE_DIR/metaswarm-session.js" \
+    "$PROJECT_DIR/.opencode/plugins/metaswarm-session.js" \
+    ".opencode/plugins/metaswarm-session.js"
+
+  # BEADS MCP server - referenced by mcp.servers.beads in opencode.json
+  update_with_prompt \
+    "$PLUGIN_ROOT/scripts/beads-mcp-server.ts" \
+    "$PROJECT_DIR/scripts/beads-mcp-server.ts" \
+    "scripts/beads-mcp-server.ts"
 }
 
 # Update instruction files for other platforms
