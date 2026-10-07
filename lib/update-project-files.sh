@@ -177,7 +177,7 @@ update_instruction_file() {
   fi
 }
 
-# Update .coverage-thresholds.json
+# Update .coverage-thresholds.json - SMART MERGE: preserve all project-specific fields
 update_coverage() {
   local target="$PROJECT_DIR/.coverage-thresholds.json"
   local template="$TEMPLATE_DIR/coverage-thresholds.json"
@@ -194,32 +194,19 @@ update_coverage() {
     if [ $diff_result -eq 2 ]; then
       skipped+=(".coverage-thresholds.json (up to date)")
     else if [ "$DRY_RUN" = false ]; then
-      # For coverage, we need to preserve threshold/command values
-      # Read current values
-      local cur_threshold cur_cmd
-      if command -v node >/dev/null 2>&1; then
-        cur_threshold=$(node -e "console.log(JSON.parse(require('fs').readFileSync('$target')).thresholds?.lines || 100)" 2>/dev/null || echo 100)
-        cur_cmd=$(node -e "console.log(JSON.parse(require('fs').readFileSync('$target')).enforcement?.command || 'npm test')" 2>/dev/null || echo "npm test")
+      # SMART MERGE: Use shell script with jq (avoids Node.js JSON.parse bug in v22)
+      local tmpfile=$(mktemp -t coverage-merge.XXXXXX.json)
+      local merge_script="$PLUGIN_ROOT/lib/merge-coverage.sh"
+      if [ ! -f "$merge_script" ]; then
+        errors+=(".coverage-thresholds.json — merge script not found at $merge_script")
+      elif ! command -v jq >/dev/null 2>&1; then
+        errors+=(".coverage-thresholds.json — jq not installed, cannot merge")
       else
-        cur_threshold=100
-        cur_cmd="npm test"
+        bash "$merge_script" "$target" "$template" "$tmpfile" && mv "$tmpfile" "$target"
+        updates+=(".coverage-thresholds.json (merged template, preserved project config)")
       fi
-      
-      # Apply template with current values - use a temp file to avoid quoting issues
-      local tmpfile=$(mktemp)
-      node -e "
-        const fs = require('fs');
-        const tmpl = JSON.parse(fs.readFileSync('$template', 'utf-8'));
-        tmpl.thresholds.lines = $cur_threshold;
-        tmpl.thresholds.branches = $cur_threshold;
-        tmpl.thresholds.functions = $cur_threshold;
-        tmpl.thresholds.statements = $cur_threshold;
-        tmpl.enforcement.command = '$cur_cmd';
-        fs.writeFileSync('$tmpfile', JSON.stringify(tmpl, null, 2) + '\n');
-      " && mv "$tmpfile" "$target"
-      updates+=(".coverage-thresholds.json (preserved threshold: ${cur_threshold}%, command: ${cur_cmd})")
     else
-      updates+=(".coverage-thresholds.json (would update, preserving threshold)")
+      updates+=(".coverage-thresholds.json (would merge, preserving project config)")
     fi
     fi
   else
