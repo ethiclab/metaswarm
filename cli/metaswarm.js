@@ -12,8 +12,46 @@ const CWD = process.cwd();
 const VERSION = require(path.join(PKG_ROOT, 'package.json')).version;
 
 const { detectPlatforms, getSummary } = require(path.join(PKG_ROOT, 'lib', 'platform-detect'));
-const OC_COMMANDS = ['setup', 'start-task', 'prime', 'review-design', 'design-review-gate', 'orchestrated-execution'];
-const OC_AGENTS = ['issue-orchestrator', 'architect-agent'];
+const OC_COMMANDS = [
+  'setup',
+  'start',
+  'start-task',
+  'prime',
+  'review-design',
+  'design-review-gate',
+  'plan-review-gate',
+  'orchestrated-execution',
+  'self-reflect',
+  'handoff',
+  'pr-shepherd',
+  'brainstorm',
+  'update',
+  'status',
+  'create-issue',
+  'handle-pr-comments',
+  'external-tools-health'
+];
+const OC_AGENTS = [
+  'issue-orchestrator',
+  'architect-agent',
+  'product-manager-agent',
+  'researcher-agent',
+  'cto-agent',
+  'security-design-agent',
+  'code-review-agent',
+  'sre-agent',
+  'metrics-agent',
+  'slack-coordinator-agent',
+  'coder-agent',
+  'pr-shepherd-agent',
+  'release-engineer-agent',
+  'customer-service-agent',
+  'test-automator-agent',
+  'security-auditor-agent',
+  'swarm-coordinator-agent',
+  'designer-agent',
+  'knowledge-curator-agent'
+];
 
 // --- Helpers ---
 
