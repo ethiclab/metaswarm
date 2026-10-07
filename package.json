@@ -23,6 +23,9 @@
     "GEMINI.md",
     "gemini-extension.json"
   ],
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0"
+  },
   "keywords": [
     "claude-code",
     "codex-cli",
