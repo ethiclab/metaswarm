@@ -25,7 +25,8 @@ if [ -z "$METASWARM_PLATFORM" ]; then
 fi
 
 # --- Phase 1: BEADS dedup check ---
-# If standalone BEADS plugin is installed, skip knowledge priming (let BEADS handle it)
+# If the standalone beads plugin is installed, it already runs `bd prime` (bd workflow
+# context) on SessionStart/PreCompact, so this hook skips its own `bd prime` call below.
 beads_standalone=false
 beads_plugin_caches=("${HOME}/.claude/plugins/cache" "${CODEX_HOME:-${HOME}/.codex}/plugins/cache")
 for beads_plugin_cache in "${beads_plugin_caches[@]}"; do
@@ -84,6 +85,14 @@ if [ "$new_project" = false ] && [ "$legacy_install" = false ]; then
     && [ ! -f "opencode.json" ]; then
     needs_heal=true
   fi
+  # A Go project's enforcement command runs the gate program (#87). If only the
+  # gate file is gone, it is copied back below without the full setup run, so
+  # customized command shims are not rewritten. A full heal writes it anyway.
+  needs_gate=false
+  if [ ! -f ".metaswarm/go-coverage-gate.go" ] \
+    && grep -qF ".metaswarm/go-coverage-gate.go" ".coverage-thresholds.json" 2>/dev/null; then
+    needs_gate=true
+  fi
   if { [ "$METASWARM_PLATFORM" = "claude" ] || [ "$METASWARM_PLATFORM" = "all" ]; } \
     && { [ ! -f ".claude/commands/start-task.md" ] || ! grep -q "metaswarm" ".claude/commands/start-task.md" 2>/dev/null; }; then
     needs_heal=true
@@ -109,6 +118,15 @@ if [ "$new_project" = false ] && [ "$legacy_install" = false ]; then
 
     # Run the setup script silently
     bash "$setup_script" "$(pwd)" "$cov_threshold" "$cov_cmd" --platform "$METASWARM_PLATFORM" >/dev/null 2>&1 || true
+  elif [ "$needs_gate" = true ]; then
+    gate_template="${PLUGIN_ROOT}/skills/setup/templates/go-coverage-gate.go"
+    # Best-effort, like the rest of self-heal, but a failure is reported on
+    # stderr (stdout carries the hook's JSON).
+    if [ ! -f "$gate_template" ]; then
+      echo "metaswarm: could not restore .metaswarm/go-coverage-gate.go: template not found at $gate_template" >&2
+    elif ! { mkdir -p .metaswarm && cp "$gate_template" .metaswarm/go-coverage-gate.go; } 2>/dev/null; then
+      echo "metaswarm: could not restore .metaswarm/go-coverage-gate.go from $gate_template (is .metaswarm/ writable?)" >&2
+    fi
   fi
 fi
 
@@ -143,13 +161,103 @@ if [ "$legacy_install" = true ]; then
   context_parts+=("This project has metaswarm installed via the old npm method. The marketplace plugin is now active and provides all the same skills and commands. Run \`${migrate_cmd}\` to clean up the redundant copies — this is a safe, reversible operation that only removes duplicate framework files (your project files are never touched).")
 fi
 
-# Knowledge priming (only if project is set up and BEADS isn't separately priming)
+# Generated agent files carry the plugin version in their header; flag any that differ
+# (e.g. after a marketplace auto-update). Version comparison only, no hashing.
+plugin_version=$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "${PLUGIN_ROOT}/.claude-plugin/plugin.json" 2>/dev/null | head -1 || true)
+if [ -n "$plugin_version" ]; then
+  for agent_file in .claude/agents/metaswarm-*.md; do
+    [ -f "$agent_file" ] || continue
+    agent_version=$(sed -n 's/^<!-- generated-by: metaswarm v\([^ ]*\) sha256:.*/\1/p' "$agent_file" | head -1 || true)
+    if [ -n "$agent_version" ] && [ "$agent_version" != "$plugin_version" ]; then
+      context_parts+=("metaswarm agents are stale — run /update")
+      break
+    fi
+  done
+fi
+
+# bd workflow context: run `bd prime` only if the project is set up and the beads plugin
+# isn't already running it. metaswarm's knowledge base is surfaced separately below.
 if [ "$new_project" = false ] && [ "$beads_standalone" = false ]; then
   if command -v bd >/dev/null 2>&1; then
     bd_output=$(bd prime 2>/dev/null || true)
     if [ -n "$bd_output" ]; then
       context_parts+=("$bd_output")
     fi
+  fi
+fi
+
+# metaswarm knowledge base (.beads/knowledge/*.jsonl), in every setup, beads plugin or not:
+# inline the MUST FOLLOW rules (fact or recommendation containing NEVER/ALWAYS/MUST as a
+# word), within KB_MAX_RULES rules and KB_MAX_BYTES bytes, then point at /prime for the
+# rest. One streaming jq pass counts every fact but keeps only the rules that fit. Without
+# a working jq (or if jq fails) only the pointer is added. An empty or missing store adds
+# nothing.
+KB_DIR=".beads/knowledge"
+KB_MAX_RULES=10
+KB_MAX_BYTES=2048
+case "$METASWARM_PLATFORM" in
+  gemini) prime_hint='`/metaswarm:prime <topic>`' ;;
+  codex) prime_hint='`$start` (it primes knowledge for the task)' ;;
+  *) prime_hint='`/prime <topic>`' ;;
+esac
+kb_files=()
+if [ -d "$KB_DIR" ]; then
+  for kb_file in "$KB_DIR"/*.jsonl; do
+    [ -f "$kb_file" ] && kb_files+=("$kb_file")
+  done
+fi
+if [ ${#kb_files[@]} -gt 0 ]; then
+  kb_total=""
+  kb_section=""
+  kb_out=""
+  if command -v jq >/dev/null 2>&1 && jq -n 1 >/dev/null 2>&1 \
+    && kb_out=$(jq -R -n -r --argjson maxr "$KB_MAX_RULES" --argjson maxb "$KB_MAX_BYTES" '
+      def clean: tostring | gsub("[[:cntrl:]]+"; " ");
+      def fit($n): if utf8bytelength <= $n then .
+        else (.[0:((length * $n / utf8bytelength) | floor)] | until(utf8bytelength <= $n; .[0:length - 1])) end;
+      reduce (inputs | select(test("^[[:space:]]*#") | not) | fromjson?
+              | select(type == "object" and (.fact | type) == "string")) as $f
+        ({total: 0, bytes: 0, rules: [], full: false};
+         .total += 1
+         | if .full then .
+           else ($f.recommendation | if type == "string" then . else "" end) as $rec
+             | if (($f.fact + " " + $rec) | test("(^|[^A-Za-z0-9_])(NEVER|ALWAYS|MUST)([^A-Za-z0-9_]|$)")) then
+                 ("- [" + (($f.type // "fact") | clean) + "] " + ($f.fact | clean)
+                   + (if $rec != "" then " -> " + ($rec | clean) else "" end)) as $line
+                 | (if (.rules | length) == 0 and ($line | utf8bytelength) > $maxb
+                    then ($line | fit($maxb - 3)) + "…" else $line end) as $line
+                 | if (.rules | length) >= $maxr
+                     or ((.rules | length) > 0 and .bytes + ($line | utf8bytelength) + 1 > $maxb)
+                   then .full = true
+                   else .rules += [$line] | .bytes += ($line | utf8bytelength) + 1 end
+               else . end
+           end)
+      | (.total | tostring), .rules[]' "${kb_files[@]}" 2>/dev/null); then
+    kb_total=$(printf '%s\n' "$kb_out" | head -n 1)
+    kb_section=$(printf '%s\n' "$kb_out" | sed '1d')
+  else
+    # No working jq: count lines that look like JSON objects, pointer only.
+    kb_total=$(cat "${kb_files[@]}" 2>/dev/null | grep -c '^[[:space:]]*{' || true)
+  fi
+  case "$kb_total" in ''|*[!0-9]*) kb_total=0 ;; esac
+  kb_shown=0
+  [ -n "$kb_section" ] && kb_shown=$(printf '%s\n' "$kb_section" | grep -c . || true)
+  kb_rest=$((kb_total - kb_shown))
+  [ "$kb_rest" -lt 0 ] && kb_rest=0
+  if [ "$kb_shown" -gt 0 ]; then
+    kb_noun="facts"; [ "$kb_rest" -eq 1 ] && kb_noun="fact"
+    kb_msg="metaswarm knowledge, MUST FOLLOW rules (from .beads/knowledge/):
+${kb_section}
+"
+    if [ "$kb_rest" -gt 0 ]; then
+      kb_msg="${kb_msg}${kb_rest} more ${kb_noun} in .beads/knowledge/ — run ${prime_hint} to load the ones relevant to your task."
+    else
+      kb_msg="${kb_msg}Run ${prime_hint} for topic-filtered knowledge."
+    fi
+    context_parts+=("$kb_msg")
+  elif [ "$kb_total" -gt 0 ]; then
+    kb_noun="facts"; [ "$kb_total" -eq 1 ] && kb_noun="fact"
+    context_parts+=("metaswarm knowledge: ${kb_total} ${kb_noun} in .beads/knowledge/ — run ${prime_hint} before planning or implementing.")
   fi
 fi
 

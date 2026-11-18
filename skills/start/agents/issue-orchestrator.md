@@ -1,3 +1,9 @@
+---
+name: issue-orchestrator
+description: "Main coordinator for a single GitHub Issue lifecycle. Use to drive one issue from research through PR."
+model: inherit
+---
+
 # Issue Orchestrator Agent
 
 **Type**: `issue-orchestrator`
@@ -61,14 +67,14 @@ When Team tools are available:
 
 1. **Create team**: `TeamCreate("issue-{issue-number}")` (e.g., `issue-123`)
 2. **Spawn specialists as named teammates**:
-   - `researcher` — persistent across research phase
-   - `architect` — persistent across planning phase
-   - `coder` — **persistent across work units** (retains context from WU-001 → WU-002, no cold start)
-   - `shepherd` — persistent through PR lifecycle, sends async status updates via `SendMessage`
+   - `researcher` (type `roleType("researcher")`) — persistent across research phase
+   - `architect` (type `roleType("planner")`) — persistent across planning phase
+   - `coder` (type `roleType("coder")`) — **persistent across work units** (retains context from WU-001 → WU-002, no cold start)
+   - `shepherd` (type `roleType("pr-shepherd-agent")`) — persistent through PR lifecycle, sends async status updates via `SendMessage`
 3. **Direct handoffs**: Researcher sends findings directly to architect via `SendMessage` (no orchestrator bottleneck)
 4. **Async updates**: Teammates report progress via `SendMessage`; orchestrator receives and coordinates
 
-**MANDATORY**: Adversarial reviewers are ALWAYS fresh `Task()` instances — never teammates, never resumed, never given prior context. This applies in BOTH modes without exception. See `./guides/agent-coordination.md` for details.
+**MANDATORY**: Adversarial reviewers are ALWAYS fresh `Task()` instances (role type `roleType("adversarial-reviewer")`, resolved per [Role type resolution](../guides/agent-coordination.md#role-type-resolution)) — never teammates, never resumed, never given prior context. This applies in BOTH modes without exception. See `./guides/agent-coordination.md` for details.
 
 ### BEADS + Team TaskList Bridging (Team Mode Only)
 
@@ -86,9 +92,9 @@ When Team tools are available:
 
 **BEFORE starting work**, prime your context:
 
-```bash
-# Prime with general context - will be refined by specialist agents
-bd prime --work-type planning --keywords "<issue-keywords>"
+```text
+Prime with general context - will be refined by specialist agents:
+`/prime` (metaswarm knowledge priming) for planning work on "<issue-keywords>"
 ```
 
 Review the output for critical rules and patterns that affect orchestration.
@@ -100,7 +106,7 @@ Review the output for critical rules and patterns that affect orchestration.
 gh issue view <number> --json title,body,labels,comments
 
 # 2. Create BEADS epic linked to Issue
-bd create "<issue-title>" --type epic --issue <number> --json
+bd create "<issue-title>" --type epic --external-ref gh-<number> --json
 
 # 3. Post acknowledgment comment
 gh issue comment <number> --body "Agent claiming this issue. Epic: <epic-id>"
@@ -113,23 +119,34 @@ gh issue comment <number> --body "Agent claiming this issue. Epic: <epic-id>"
 bd create "Research: <issue-title>" --type task --parent <epic-id> \
   --description "Investigate codebase, prior art, and constraints"
 
-# 5. Spawn Researcher Agent (Task tool with subagent)
+# 5. Spawn Researcher Agent (Task tool, role type roleType("researcher"))
 # Wait for research output
 
 # 6. Create planning task (blocked by research)
 bd create "Create implementation plan" --type task --parent <epic-id>
 bd dep add <plan-task> <research-task>
 
-# 7. Spawn Architect Agent for planning
+# 7. Spawn Architect Agent for planning (role type roleType("planner"))
+#    The plan must carry an "Assumptions (unconfirmed)" section (ids A1, A2, ...) and a "Confirmed" section
+#    (what the user confirmed, in the user's words). Never label an agent proposal as a user decision.
 # Wait for plan output
 
-# 8. Create CTO review task (blocked by planning)
-bd create "CTO review of implementation plan" --type task --parent <epic-id>
-bd dep add <review-task> <plan-task>
+# 8. Plan Review Gate (blocked by planning): run the plan-review-gate skill
+#    3 adversarial reviewers (Feasibility, Completeness, Scope & Alignment),
+#    role type roleType("plan-reviewer"); ALL must PASS under the severity rule
+bd create "Plan Review Gate" --type task --parent <epic-id>
+bd dep add <plan-review-task> <plan-task>
 
-# 9. Spawn CTO Agent for review
-# May iterate multiple times until approved
+# 9. Design Review Gate (blocked by the Plan Review Gate): run the
+#    design-review-gate skill on the plan. In full orchestration there is no
+#    separate design doc, so the 6 reviewers (PM, Architect, Designer, Security,
+#    UX Reviewer, CTO; role type roleType("design-reviewer")) review the plan.
+#    ALL must approve; iterate under the severity rule (cap 10 rounds)
+bd create "Design Review Gate" --type task --parent <epic-id>
+bd dep add <design-review-task> <plan-review-task>
 ```
+
+Both gates are BLOCKING: do not decompose into work units until the Plan Review Gate has passed and the Design Review Gate has approved. If the Design Review Gate revises the plan, run the Plan Review Gate again on the revised plan (fresh reviewers) before presenting it; a revision that fails it goes back through both gates. The plan-review-gate skill presents the plan to the user when it passes; here the Design Review Gate runs first, so present the plan once both gates have approved, and after the user approves it persist it to `.beads/plans/active-plan.md` as that skill's Plan Persistence section describes.
 
 ### Phase 2a: External Dependency Detection
 
@@ -165,7 +182,7 @@ Are these configured in your .env file? [Y/n]
 
 ### Phase 2b: Work Unit Decomposition
 
-After the architect creates the implementation plan and design review approves it, decompose into work units before implementation begins.
+After the plan passes the Plan Review Gate and the Design Review Gate approves it, decompose into work units before implementation begins.
 
 ```bash
 # 10. Decompose the approved plan into work units
@@ -199,7 +216,7 @@ For each work unit (respecting dependency order), run the 4-phase execution loop
 For each work unit (respecting dependency graph):
 
   Phase 3.1: IMPLEMENT
-  ├── Spawn Coder Agent with spec, DoD items, and file scope
+  ├── Spawn Coder Agent (role type roleType("coder")) with spec, DoD items, and file scope
   ├── Coder implements using TDD
   └── Coder reports completion (DO NOT TRUST THIS)
 
@@ -211,11 +228,11 @@ For each work unit (respecting dependency graph):
   └── If ANY fails → back to Phase 3.1
 
   Phase 3.3: ADVERSARIAL REVIEW
-  ├── Spawn FRESH Code Review Agent in adversarial mode
+  ├── Spawn FRESH Code Review Agent (role type roleType("adversarial-reviewer")) in adversarial mode
   ├── Pass: spec, DoD items, diff (NOT coding subagent's self-assessment)
   ├── Reviewer checks each DoD item with file:line evidence
   ├── If PASS → Phase 3.4
-  └── If FAIL → back to Phase 3.1, then FRESH reviewer (max 3 retries → escalate)
+  └── If FAIL → back to Phase 3.1, then FRESH reviewer (severity-gated iteration, cap 10 rounds → escalate)
 
   Phase 3.4: COMMIT
   ├── git add <file-scope-files>
@@ -224,7 +241,7 @@ For each work unit (respecting dependency graph):
   └── If human checkpoint → present report and WAIT
 ```
 
-**Coder Agent spawn template:**
+**Coder Agent spawn template** (role type `roleType("coder")`):
 
 ```
 You are the CODER AGENT for work unit ${wuId}.
@@ -252,7 +269,7 @@ Check SERVICE-INVENTORY.md for existing services, factories, and modules.
 Do NOT recreate services that already exist — extend or import them.
 ```
 
-**Adversarial Reviewer spawn template:**
+**Adversarial Reviewer spawn template** (role type `roleType("adversarial-reviewer")`):
 
 ```
 You are the ADVERSARIAL REVIEWER for work unit ${wuId}.
@@ -272,18 +289,42 @@ ${dodItems.map((item, i) => `${i+1}. ${item}`).join('\n')}
 ## What to Review
 Run: git diff main..HEAD -- ${fileScope.join(' ')}
 
+## Findings
+Report every finding with the 6 fields defined in `./guides/delivery-scope.md`:
+- title: <short label, ≤ ~80 chars>
+- description: <1-3 sentences: what is wrong and why it matters>
+- severity: critical | major | minor | nit
+- protects: <credible user scenario | explicit requirement | DoD item>   # required for critical/major
+- evidence: <file:line or expected-vs-found>
+- blocker: yes | no      # yes only if severity ∈ {critical, major} AND protects is non-empty
+Also report the signal fields (the guide defines them):
+- theme: <short label>       # on every finding; reuse an earlier theme label when one fits
+- needs_user: yes | no       # blockers only: yes only if just the user can answer it
+- origin: implementation | requirement | assumption   # blockers only
+- assumption: <ledger id such as A3, or a quoted decision>   # required when origin is assumption
+
+## Earlier Theme Labels
+${themeLabels}
+(Round 1: none. From round 2 on these are the canonical theme labels from earlier rounds, labels only. Reuse one in `theme` when it fits; otherwise use a new short label.)
+
+## Confirmed Answers
+${confirmedAnswers}
+(The current Confirmed list and open Assumptions (ids A1, A2, ...) from the design or plan's assumption ledger, copied verbatim. Use these ids in `assumption`.)
+
+Do not mark a question `needs_user` when the Confirmed Answers above already answer it.
+
 ## Rules
 - Check EACH DoD item. Cite file:line evidence for PASS or expected-vs-found for FAIL.
-- Any single BLOCKING issue means overall FAIL.
+- Any `blocker: yes` finding means overall FAIL. A critical or major finding without `protects` is advisory (`blocker: no`).
 - You have NO context from previous reviews. Judge fresh.
-- Do NOT suggest improvements. Only report PASS or FAIL with evidence.
+- Report every finding with the 6 fields; minor/nit findings are recorded as follow-ups, not suggestions.
 ```
 
 **Critical orchestrator rules during Phase 3:**
 
 1. **Never trust self-reports**: Run tsc, eslint, vitest YOURSELF — do not ask the coder
-2. **Fresh reviewer on re-review**: Spawn a NEW adversarial reviewer after each FAIL
-3. **Max 3 retries per work unit**: After 3 FAILs, escalate (see Recovery Protocol)
+2. **Fresh reviewer on re-review**: Spawn a NEW adversarial reviewer (role type roleType("adversarial-reviewer")) after each FAIL
+3. **Severity-gated iteration on review FAIL**: After each review round, apply the severity rule (cap 10 rounds; see `./guides/delivery-scope.md` and the `orchestrated-execution` skill's On FAIL protocol). It decides whether to iterate, advance, clarify or escalate. Minor/nit findings become follow-ups
 4. **Respect file scope**: Verify with `git diff --name-only` after each implementation
 5. **Parallel where possible**: Independent work units can run Phase 3.1 simultaneously
 6. **Maintain project context**: After each work unit COMMIT, update the project context document with:
@@ -354,23 +395,17 @@ git log main..HEAD --oneline
 # Create PR task (blocked by final comprehensive review)
 bd create "Create PR and shepherd to merge" --type task --parent <epic-id>
 
-# Create the actual PR with automatic shepherding
-# Option A: Use the wrapper script (recommended for CLI workflows)
-bin/create-pr-with-shepherd.sh --title "<title>" --body "<body>" --base main
-
-# Option B: Create PR manually and invoke pr-shepherd skill
+# Create the PR, then hand it to a PR shepherd right away
 gh pr create --title "<title>" --body "<body>" --base main
-# Then invoke: /pr-shepherd <pr-number>
-
-# PR Shepherd Agent automatically starts (via Option A or skill invocation)
-# The pr-shepherd monitors CI, responds to comments, resolves threads
+# Then delegate /pr-shepherd <pr-number> (do not run it yourself):
+#   Task Mode: a background Task() with role type roleType("pr-shepherd-agent")
+#   Team Mode: the shepherd teammate in the issue-{number} team
+# The shepherd monitors CI, responds to comments, resolves threads
 
 # Wait for human merge approval
 bd update <pr-task> --status blocked
 bd label add <pr-task> waiting:human
 ```
-
-**Note**: The `create-pr-with-shepherd.sh` script automatically invokes the pr-shepherd skill after creating the PR. Use `--no-shepherd` flag if you want to skip automatic shepherding.
 
 ### Phase 5: Closure
 
@@ -378,7 +413,7 @@ bd label add <pr-task> waiting:human
 # 18. After merge, close epic
 bd close <epic-id> --reason "PR #<number> merged"
 
-# 19. Spawn Knowledge Curator to extract learnings
+# 19. Spawn Knowledge Curator (role type roleType("knowledge-curator-agent")) to extract learnings
 bd create "Extract learnings from <epic-id>" --type task
 
 # 20. Update GitHub Issue
@@ -390,7 +425,10 @@ gh issue close <number> --comment "Completed via PR #<pr-number>"
 ## Task Dependencies
 
 ```
-Research ──→ Planning ──→ Design Review Gate ──→ Work Unit Decomposition
+Research ──→ Planning ──→ Plan Review Gate ──→ Design Review Gate (reviews the plan)
+                                                         │
+                                                         ▼
+                                              Work Unit Decomposition
                                                          │
                                          ┌───────────────┼───────────────┐
                                          ▼               ▼               ▼
@@ -434,9 +472,9 @@ Each Work Unit runs the 4-Phase Execution Loop:
 Use the Task tool to spawn specialist agents:
 
 ```typescript
-// Example: Spawn Researcher Agent
+// Example: Spawn Researcher Agent (role type resolved per the guide's Role type resolution rule)
 Task({
-  subagent_type: "general-purpose",
+  subagent_type: roleType("researcher"),
   description: "Research for issue #123",
   prompt: `You are acting as the RESEARCHER AGENT for BEADS epic ${epicId}.
 
@@ -457,7 +495,6 @@ Task({
   ## Output
   When complete, update the BEADS task:
   \`\`\`bash
-  bd update ${taskId} --status closed
   bd close ${taskId} --reason "Research complete. See findings below."
   \`\`\`
 
@@ -495,17 +532,17 @@ Each sub-epic gets its own Issue Orchestrator instance that follows the full wor
 Before implementation proceeds, ALL parallel reviewers must approve:
 
 ```text
-Plan Complete
+Plan Review Gate passed
     │
     ├── PM Agent (approve/reject)
     ├── Architect Agent (approve/reject)
     ├── Designer Agent (approve/reject)
-    ├── UX Reviewer (approve/reject) — NEW
     ├── Security Agent (approve/reject)
+    ├── UX Reviewer (approve/reject)
     └── CTO Agent (approve/reject)
     │
     ALL APPROVED? → Proceed to implementation
-    ANY REJECTED? → Iterate (max 3x) → Escalate to human
+    ANY REJECTED? → Severity-gated iteration (cap 10 rounds) → Escalate to human
 ```
 
 **UX Reviewer responsibilities** (Issue #12):
@@ -536,7 +573,21 @@ Escalate to human when:
 4. **Scope Creep**: Work expanding beyond original Issue
 5. **Blocked > 1 Hour**: External dependency or access needed
 
+Stop for the user (not an escalation) when:
+
+1. **Clarify Signal**: the severity rule's line 2 fires (the user is needed or the reviews are not converging); stop and send the Clarification report
+
 ### Escalation Format
+
+**Severity-rule escalations never use this template.** When a review gate escalates (the 10-round cap, or a recurring or disputed blocker), still mark the task waiting (`bd update <task-id> --status blocked` and `bd label add <task-id> waiting:human`), then post the Review Escalation report from the Escalation template in `./guides/delivery-scope.md` instead. Its options are **Revise**, **Clarify the requirement / re-brainstorm**, **Narrow scope**, **Defer** and **Cancel**, and any revised or narrowed work gets a fresh review round that it must pass. There is no `@beads approve` for an escalated review gate: escalation never approves.
+
+**A Clarify signal (rule line 2) is a stop, not an escalation.** Run the misunderstanding analysis, post the Clarification report from the Clarify section of `./guides/delivery-scope.md`, mark the task waiting the same way, and wait for the user.
+
+- **Standing instructions.** "Keep going", "use your judgment" and similar instructions never acknowledge a signal, answer a question or default a `needs_user` question. Only an answer to the specific question counts. While you wait, keep working on parts the questions do not affect.
+- **Restate the answers.** When the user answers, restate the user's answer in your own words and get it confirmed before it goes in the Confirmed list. A one-word acknowledgement of a message with several parts confirms nothing.
+- **Keep the ledger.** When the work has no brainstorming, keep the assumption ledger yourself in the plan's Assumptions section: an "Assumptions (unconfirmed)" list with ids A1, A2, ... and a "Confirmed" list. Never label your own proposal as a user decision.
+
+For triggers 1-5 above (Clarify uses the Clarification report and is never approved with `@beads approve`):
 
 ```bash
 # Mark task as waiting for human
@@ -602,10 +653,10 @@ During the 4-phase execution loop, follow the structured recovery protocol defin
 
 1. **DIAGNOSE**: Identify which phase failed and gather evidence
 2. **CLASSIFY**: Fixable (clear error) / Ambiguous (unclear cause) / External (dependency issue)
-3. **RETRY**: Max 3 attempts per work unit, with escalating approaches
-4. **ESCALATE**: After 3 failures, escalate to human with full failure history
+3. **RETRY**: VALIDATE failures (tests, coverage, lint, typecheck) get up to 3 attempts per work unit, with escalating approaches. VALIDATE attempts count consecutive failed VALIDATE runs for the work unit; a VALIDATE PASS resets the count to 0, so each review round's re-validation starts fresh. The number of review rounds is governed separately by the severity rule and its 10-round cap. Review FAILs follow severity-gated iteration instead (cap 10 rounds; see `./guides/delivery-scope.md`)
+4. **ESCALATE**: After 3 VALIDATE failures, or when the severity rule says escalate, escalate to human with full failure history; when it says clarify, stop for the user with the Clarification report (a Clarify stop is not an escalation)
 
-Track retries with labels:
+Track VALIDATE attempts with labels, and remove the `retry:N` label when VALIDATE passes (review rounds are tracked in `.beads/context/execution-state.md`, not labels):
 
 ```bash
 bd label add <task-id> retry:1  # or retry:2, retry:3
@@ -642,7 +693,7 @@ bd doctor
 
 ```bash
 # Create epic linked to GitHub Issue
-bd create "<title>" --type epic --issue <number> --json
+bd create "<title>" --type epic --external-ref gh-<number> --json
 
 # Create task under epic
 bd create "<title>" --type task --parent <epic-id> --json
@@ -686,7 +737,7 @@ The Issue Orchestrator reports progress via GitHub comments:
 
 ### In Progress
 
-- [ ] Implementation (assigned to coder-agent)
+- [ ] Implementation (assigned to coder)
 
 ### Blocked
 

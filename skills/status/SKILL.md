@@ -77,7 +77,7 @@ When checking a Codex project, report `not applicable (Codex uses $skill-name in
 ### 6. BEADS Plugin
 
 - Scan `~/.claude/plugins/cache/` and `~/.codex/plugins/cache/` for a directory containing `.claude-plugin/plugin.json` or `.codex-plugin/plugin.json` with `"name": "beads"`
-- If found: `installed (standalone)` -- metaswarm defers priming to BEADS
+- If found: `installed (standalone)` -- the plugin runs `bd prime` (bd workflow context), so metaswarm's session hook skips its own `bd prime` call. Knowledge-base facts still come from `/prime`
 - If not found: `not separately installed`
 
 ### 7. `bd` CLI
@@ -87,7 +87,7 @@ command -v bd && bd --version 2>/dev/null
 ```
 
 - If found: report path and version
-- If not found: `not installed -- knowledge priming and self-reflect require bd. Core orchestration works without it.`
+- If not found: `not installed -- BEADS task tracking requires bd. Core orchestration and /prime work without it.`
 
 ### 8. `gtg` CLI
 
@@ -115,7 +115,20 @@ Report per-tool: enabled (yes/no), status (available/not installed).
 - Read `.coverage-thresholds.json` -- if absent: `not configured`
 - If present, report threshold values (lines, branches, functions, statements) and enforcement command
 
-### 11. Node.js
+### 11. Phase Agents (Claude Code)
+
+```bash
+# The plugin bin/ is on PATH in Claude Code; fall back to the plugin root elsewhere
+MA="$(command -v metaswarm-agents.sh || echo "${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/bin/metaswarm-agents.sh")" # command -v metaswarm-agents.sh
+"$MA" check
+```
+
+- Exit 0: `generated agents are up to date` (or `no models.yaml — using plugin defaults; run /setup to customize`)
+- Exit 1: list each drifted file (`hand-edited`, `stale`, `orphan`, `missing`) and recommend `/update` (or `generate --force` for hand-edited files)
+- Exit 2: report the `models.yaml:<line>: <reason>` error
+- Also run `claude --version`; if it is older than 2.1.251, warn: `Claude Code is older than 2.1.251 -- CLAUDE_CODE_SUBAGENT_MODEL can override agent models; upgrade`. If `claude` is not found, skip the version check.
+
+### 12. Node.js
 
 ```bash
 node --version 2>/dev/null
@@ -140,10 +153,11 @@ node --version 2>/dev/null
 | Command shims | Not applicable (Codex uses $skill-name) |
 | Legacy embedded plugin | Not detected |
 | BEADS plugin | Not separately installed |
-| bd CLI | Available (v0.5.2) |
+| bd CLI | Available (v1.3.4) |
 | gtg CLI | Available |
 | External tools | Codex: available, Gemini: not installed |
 | Coverage thresholds | 100% (all categories) |
+| Phase agents | Up to date |
 | Node.js | Available (v22.4.0) |
 
 ### Issues Found
@@ -161,7 +175,7 @@ When issues are found:
 2. Codex plugin not installed from a marketplace -- install from `/plugins` after adding the marketplace
 
 ### Recommendations
-1. Install `bd` CLI for knowledge priming and self-reflect
+1. Install `bd` CLI for BEADS task tracking
 2. Install `gtg` for the fastest `$pr-shepherd` readiness checks
 3. Configure external tools for cross-model review (`.metaswarm/external-tools.yaml`)
 ```

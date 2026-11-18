@@ -1,0 +1,8 @@
+{
+  "agent": "metaswarm:design-reviewer",
+  "rubric": "security-design-agent",
+  "defects": {
+    "idor": "The handler loads the invoice by ID with no ownership check, so any signed-in customer can download another customer's invoice (IDOR).",
+    "secretsInLogs": "The handler logs the full request, including headers, at info level, which writes credentials such as the Authorization header, cookies or session tokens to the logs."
+  }
+}

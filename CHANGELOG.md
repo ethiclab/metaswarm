@@ -1,5 +1,155 @@
 # Changelog
 
+## [Unreleased]
+
+## 0.16.0
+
+### Added
+
+- **Reviews now stop and ask when the requirement is the problem** (#103). The review iteration rule gains a Clarify line (line 2, after the clean pass). It fires on four signals:
+  - C1: a blocker needs the user (`needs_user`) or rests on an unconfirmed assumption;
+  - C2: blocker totals are not converging over three rounds, or reviewers diverge (the total did not fall, one reviewer dropped to no blockers and another rose; a falling total never counts);
+  - C3: fixes keep causing new blockers;
+  - C4: the same theme recurs across rounds.
+  Instead of a plain escalation, the gate writes a Clarification report with a misunderstanding analysis and five options. There is no approve or override option. "Keep going" never defaults a `needs_user` question. The escalation lines (3-5) gain a "Clarify the requirement / re-brainstorm" option, and the rule lines are now numbered 1 to 7 (they ran 1 to 6).
+- **A deterministic helper applies the rule** (#103). `lib/review-rule.js` reads a per-gate review-history file under `.beads/context/review-history/` and prints the rule line, action and signals, so the orchestrator no longer does the signal arithmetic by hand. In the metaswarm repo it runs the working copy, elsewhere the installed plugin's copy.
+- **Reviewers report signal fields** (#103). Every finding carries `theme`. Blockers also carry `needs_user`, `origin` (implementation, requirement or assumption) and, when the blocker rests on an assumption, the ledger id. Only blockers feed the signals.
+- **Brainstorming keeps an assumption ledger** (#103). `brainstorming-extension` loads at the start of every brainstorming session with an assumption ledger, a confirmation rule and a Common misreadings checklist. The no-superpowers `/brainstorm` fallback applies them too.
+- **Misreadings are learned per project** (#103). A confirmed misunderstanding is stored in the project's knowledge base as a gotcha tagged `misunderstanding`, with an opt-in upstream issue.
+- **Review history is recovered on resume** (#103). `/prime`, `/start-task`, `/start` and `/handoff` read `.beads/context/review-history/` so a clarify-pending gate re-asks its questions after compaction or in a new session, and the handoff names the open history files.
+
+### Fixed
+
+- **Reviewers get their criteria even when the orchestrator paraphrases the prompt** (#105). Orchestrators often summarise the gate templates, or send "read this brief and follow it exactly", and reviewers then skipped their rubric. In one session only 1 of 73 design reviewers opened theirs.
+  - `design-reviewer` now carries every role's Review Criteria checklist and fills in a `### Criteria check` table, one row per item.
+  - `plan-reviewer` carries the adversarial plan rubric's Review Categories and fills in the same kind of table over its category's checks.
+  - `adversarial-reviewer` now starts with the receipt and reads its mode's rubric file, because the rubric's classification tables set severity.
+  - All three reviewer types put a `Criteria applied:` line right after the verdict heading, naming the rubric they applied. A review without it is re-requested once, then accepted with a follow-up, so it never blocks a gate.
+  - A test fails when an embedded checklist drifts from its source.
+  - `evals/reviewer-rubric/` holds the eval behind the change. It runs by hand, never in CI. With planted defects, the missing test plan went from 0/3 to 3/3 caught, the missing API contract from 0/3 to 3/3, and the `any` type rated as the rubric requires from 0/3 to 3/3.
+- **A rubric entry is not itself a requirement** (#112). A "BLOCKING" row sets severity; the finding blocks only when `protects` names a DoD item, the spec, a credible user scenario, or a written project standard (CLAUDE.md, coding standards, lint or tsconfig settings). The adversarial, plan, external-tool and UX rubrics state this in their mapping line, so Codex and Gemini reviewers, which get the rubric but not the guide, see it too. The no-`any` row now blocks only when the project states the rule, and is advisory otherwise. Before, reviewers split on `any` in projects with no such rule.
+- **The reviewer eval scores replies with a Haiku judge** (#109). Regex scoring got cells wrong in both directions; a tool-less Haiku call now judges whether each planted defect is reported, for about $0.001 a trial. Calibration against 282 hand labels agreed on 279. Three published cells were corrected (see `evals/reviewer-rubric/README.md`).
+
+### Changed
+
+- **The overengineering check now comes before the "two or more reviewers, so iterate" line** (#103). The rule is: pass, clarify, cap, recurring or disputed, overengineering, then iterate (line 6 for a fixed critical/major finding or two or more reviewers, line 7 otherwise). Before, a round with blockers from two or more reviewers iterated before the overengineering check could run. This is a behaviour change: a round flagged `overengineering` now gets the check first.
+
+### Upgrading
+
+`/setup` skips instruction files (CLAUDE.md, AGENTS.md, GEMINI.md) that already have a metaswarm section, and `/update` does not rewrite them. Re-running `/setup` will not do it either. Existing projects must update their instruction file by hand from the new templates (`templates/CLAUDE.md`, `templates/AGENTS.md` and `templates/GEMINI.md` in the metaswarm plugin):
+
+1. Replace "Delivery Scope & Review Iteration": the new bullet order, with Clarify after the clean pass.
+2. Add the new "During Brainstorming" section: it loads the brainstorming extension at the start of every session.
+3. CLAUDE.md only: replace the Context Recovery line, which now names the review history and `clarify-pending`.
+
+Projects that generated phase agents (`.claude/agents/metaswarm-*.md`, from `/setup` or `metaswarm-agents.sh generate`) must run `/update`, or `metaswarm-agents.sh generate`, to pick up the reviewer criteria and the `Criteria applied:` receipt (#105). Role-type resolution uses those local copies first. Until they are regenerated, each review is re-requested once for the missing receipt. `metaswarm-agents.sh check` reports the copies as stale.
+
+## 0.15.0
+
+### Fixed
+
+- **The Go coverage gate now fails below the threshold** (#78). `go test` has no threshold flag, so the `go test -coverprofile=coverage.out ./...` command that `/setup` wrote never failed. Setup now writes `.metaswarm/go-coverage-gate.go`, a standard-library Go program, and sets `enforcement.command` to `go run .metaswarm/go-coverage-gate.go`. It reads `.coverage-thresholds.json` on every run, compares exact statement counts (2,499 of 2,500 fails at 100%, though `go tool cover` shows 100.0%), enforces `lines` and `statements`, and reports `branches` and `functions` as not enforced. It passes the CI template's command guard. Existing Go projects: re-run `/setup`, which replaces the old `go test` command with the gate and writes the gate file, or set the command by hand (see `docs/coverage-enforcement.md`).
+- **Re-running `/setup` with a new threshold updates `.coverage-thresholds.json`** (#79). With the new `--reconfigure` flag, which interactive `/setup` always passes, `lib/setup-mandatory-files.sh` updates an existing file's four thresholds and a `--cov-fail-under`/`--fail-under` value in `enforcement.command`, and keeps every other setting. This also applies the user's answers on a first `/setup` after `npx metaswarm setup` copied the template. It replaces the old bare `go test` command with the Go gate, keeping that command's own flags and packages, and warns when the command still embeds the old threshold in another form or names a different test runner than the one detected. The session hook's silent self-heal never changes an existing file. The script's JSON output gains a `warnings` array and escapes messages properly.
+- **Test suites with an EXIT trap fail when they abort** (#75). On macOS bash 3.2 a `set -u` abort exited with the trap's status 0, so a crashed suite looked like a pass.
+- **Gemini commands point at skills and files that exist** (#50). Eight generated `commands/metaswarm/*.toml` prompts told the agent to invoke a metaswarm skill that doesn't exist (`start-task`, `prime`, `review-design`, `self-reflect`, `brainstorm`, `update`, `handle-pr-comments`, `external-tools-health`). They now name the real skill (`design-review-gate`, `handling-pr-comments`) or tell the agent to follow the command's `commands/<name>.md` in the extension directory, with `PLUGIN_ROOT` set to it (for `/start-task` that is `commands/start-task.md`, the same flow Claude runs; Gemini's `/update` also names `gemini extensions update metaswarm`). A test checks every TOML target.
+- **No more `npx metaswarm install`** (#74). The migrate skill's rollback notes named a command that doesn't exist. They now say to restore the old files from git, and what `npx metaswarm init` and `setup` actually do today. A test fails on any `metaswarm install` in tracked docs.
+- **The two pipelines are stated, and every order statement matches** (#73). `guides/workflow-enforcement.md` now shows both: on the brainstorming path (`/start-task`, `/brainstorm`) the Design Review Gate reviews the design doc before writing-plans. In full orchestration it reviews the plan, after the Plan Review Gate. The CLAUDE/AGENTS/GEMINI templates, README, GETTING_STARTED, USAGE, the start and orchestrated-execution skills, the issue-orchestrator diagram and the landing page now name the Plan Review Gate and say which pipeline they describe. GETTING_STARTED's `/start-task` list had the gates in the wrong order. A line-level guard with self-test fixtures catches chains that skip the Plan Review Gate.
+- **CI and hook templates fit the project** (#83).
+  - `/setup` renders `.github/workflows/ci.yml` with the new `lib/render-ci.sh`. It keeps the toolchain steps for the detected stack (Node with npm, Python, Go or Rust) and drops the others. Other stacks (and pnpm, yarn, bun, Poetry, uv or Pipenv projects) are pointed at `templates/ci-coverage-job.yml`, and the required-check offer is skipped for them.
+  - The workflow runs on pushes to the repo's default branch, read from `origin/HEAD` or `gh repo view`, instead of a hard-coded `main`. It checks pull requests into any branch.
+  - After writing CI, `/setup` asks whether to make the `CI checks` job required on the default branch. On yes, `lib/require-ci-check.sh` adds a ruleset through `gh api`, leaving existing branch protection alone, and prints the manual steps if it can't.
+  - The CI template and `templates/pre-push` run `lint` and `typecheck` only when `package.json` defines them. A failing script, or a `package.json` that can't be parsed, still fails the build or blocks the push. The hook now blocks on a failing typecheck, and uses pnpm when the project does.
+  - The plan-review gate always runs for a plan that builds user-facing UI, whatever its size, so the check for a UI integration work unit isn't skipped.
+- **PR skills no longer call scripts that don't exist** (#91). `handling-pr-comments` told the agent to run `bin/pr-comments-out-of-scope.sh`. Phase 2c now lists the out-of-scope comments itself: unresolved threads GitHub marks outdated or that no longer map to a diff line, and general PR discussion comments. `pr-shepherd`, the start skill and the issue-orchestrator offered `bin/create-pr-with-shepherd.sh`. They now say to run `gh pr create`, then `/pr-shepherd <pr-number>` (the orchestrator delegates it to a background shepherd). Phase 2c prints every comment in full, replies included. Neither script ever shipped. A test fails when a tracked doc, skill, command, agent or template references a `bin/` script that isn't in `bin/`.
+- **Migrate backs up untracked legacy files instead of deleting them** (#90). Step 7 removed untracked copies with `rm -f`, which git can't undo. It now moves them to `.metaswarm/migrate-backup-<timestamp>/`, keeping their paths, and the summary names the folder. Rollback shows how to copy them back (symbolic links as links; a file already back counts as restored, a different file at the path is never overwritten, and a conflict or failed copy keeps the backup), Step 7 reports any file it couldn't move instead of counting it, and the "Reversible" note says so. A test runs the skill's own backup and restore snippets against a scratch repo.
+- **The issue-orchestrator runs the Plan Review Gate** (#89). Phase 2 went Research → Plan → a lone CTO review, so neither the Plan Review Gate nor the 6-reviewer Design Review Gate ran, although its diagram showed both. Phase 2 now runs the `plan-review-gate` skill (3 adversarial reviewers), then the `design-review-gate` skill on the plan, both blocking, before work unit decomposition. The same change is made in `skills/start/agents/issue-orchestrator.md`. The order guard now splits each chain into steps, so it also catches emphasis (`**Design Review Gate**`), other arrows (`⇒`, `=>`), `/review-design`, an intermediate step (`Plan → Plan Validation → Design Review Gate`) and, on the brainstorming path, a Plan Review Gate before the Design Review Gate. The #73 regex still runs on every line, so nothing it caught is missed. Each variant has a self-test fixture.
+- **The fallback CI job and the pre-push hook fit more projects** (#97).
+  - `templates/ci-coverage-job.yml`, where `/setup` sends stacks it can't render a full workflow for, picks pnpm, yarn (classic or Berry), bun or npm from the lockfile instead of always running `npm ci`. Without a `package.json` it fails with a message to add the project's toolchain, and its header shows Poetry, uv, Pipenv and Java install lines.
+  - `/setup` asks those stacks whether to add the coverage job, not whether to "create a CI pipeline" it won't write.
+  - The pre-push hook stops the push when a project has a `package.json` but `node` isn't on PATH, instead of skipping lint and typecheck. Its format step uses pnpm only with a `pnpm-lock.yaml`, like lint and typecheck.
+  - The rendered `ci.yml` passes actionlint with shellcheck (the coverage step's literal `$` pattern is annotated).
+- **A plan revised in design review goes back through the Plan Review Gate** (#94). `guides/workflow-enforcement.md` and the design-review-gate skill now state what the issue-orchestrator already does: in full orchestration, a plan the Design Review Gate revises gets a fresh Plan Review Gate round, and a revision that fails it goes back through both gates. On the brainstorming path the Design Review Gate re-reviews a revised design doc in its usual fresh round, and the Plan Review Gate runs once, on the plan writing-plans writes. The order guard now treats a leading `/start-task` as the brainstorming path, splits chains on `➡`, `⮕`, `⟹`, `──►`, `─►`, plain `──` and a spaced ` > `, counts "Plans" as a plan step, and sees formatted gate names after an adjacent comma or semicolon. Prose with `;`, HTML, and `writing-plans` are not flagged. Each form has a self-test fixture.
+- **Session start restores a missing Go coverage gate** (#87). When `.coverage-thresholds.json` runs `.metaswarm/go-coverage-gate.go` and the file is gone, the session hook's self-heal now writes it back from the plugin. When the gate is the only thing missing, it copies the file back without the full setup run, so customized command shims, the thresholds and the enforcement command are left as they are.
+
+## 0.14.0
+
+### Added
+
+- **UX Reviewer is the 6th Design Review Gate reviewer** (#12). The gate now spawns PM, Architect, Designer, Security, UX Reviewer and CTO. The UX Reviewer has its own persona (`agents/ux-reviewer-agent.md`) and rubric (`rubrics/ux-review-rubric.md`). It checks that every user flow has a trigger and a visible outcome, that screens have a component hierarchy, that empty, loading and error states are defined, and that the design describes how the components are wired into the app shell. The integration work unit itself is checked at plan review (new Completeness row in `plan-review-rubric-adversarial.md`). A design with no user-facing UI is approved when the task needs none. Issue #12 had described this reviewer in the docs, but it was never added to the gate until now. There are now 23 agents and 10 rubrics, and a test ties the stated counts to the real files.
+
+### Changed
+
+- **Review findings carry `title` and `description`** (#58). Every finding uses six fields, `title`, `description`, `severity`, `protects`, `evidence` and `blocker`, and context recovery matches recurring findings by title and description.
+- **Execution state splits "Retries" into VALIDATE attempts and review rounds** (#59). The VALIDATE counter counts consecutive failures and resets on PASS; review rounds follow the severity rule (cap 10). A pre-split state file's `Retries` value is read as VALIDATE attempts.
+- **Escalation never approves** (#68). A review gate advances only when a fresh round has no `blocker: yes` finding, or when rule line 5's overengineering check downgrades every remaining blocker to a follow-up. Escalating to the human never approves: the options are Revise / Narrow scope / Defer / Cancel, and Override and `--force-override` are removed.
+- **Workflow enforcement reconciled with superpowers >= 6.4.1** (#67). The canonical rules live in `guides/workflow-enforcement.md`; skills and the CLAUDE.md/AGENTS.md/GEMINI.md templates point to it.
+- **Design Review Gate runs only for project-sized work** (#67). Quick tasks, chat-only designs and short design docs for small changes (superpowers 7.0.1+) skip it.
+- **`docs/superpowers/specs/` is watched** (#67) alongside `docs/plans/`, and `/review-design --latest` searches both folders.
+- **Plan Review Gate intercepts before writing-plans presents the plan** (#67), ahead of its own Execution Handoff.
+- **Execution menu option 3 is now "Native inline execution"** (#67, `superpowers:executing-plans`), replacing "Parallel session"; the 3-option menu replaces writing-plans' 2-option handoff.
+- **INSTALL.md lists all 9 referenced superpowers skills** (#67) and states the minimum version (superpowers >= 6.4.1, tested with 7.0.2).
+- **The session hook surfaces metaswarm's knowledge base** (#70), with or without the beads plugin. At session start and compaction it inlines the MUST FOLLOW rules from `.beads/knowledge/` (capped at 10 rules or about 2 KB) and points to `/prime <topic>` for the rest. Without a working `jq` it adds only the pointer. Existing `bd prime` behaviour is unchanged.
+- **Orphaned command mirrors are caught** (#64). `node lib/sync-resources.js --check` reports any `.claude/commands/*.md` that has no source in `commands/` and isn't on the exclusion list, and `--sync` removes it. Excluded names and non-`.md` files are never touched.
+- **`/metaswarm-setup` and `/metaswarm-update-version` are now short deprecated aliases** for `/setup` and `/update` (#64). Their old npm-era bodies called CLI commands that don't exist (`install`, `changelog`), set the version even when agent regeneration failed, offered CI creation they never performed, and had a Go coverage gate that never failed.
+- **`/external-tools-health` runs each adapter's `health` check** (#64) and reports `status`, `version`, `auth_valid` and `model`. It no longer relies on `command -v` and the repo's own self-test script.
+
+### Fixed
+
+- **`.claude/commands/` mirrors `commands/`** (#61), so this repo's unprefixed commands no longer serve stale copies. `node lib/sync-resources.js --check` blocks drift. `status.md` (it would shadow the built-in `/status`) and the two legacy commands are excluded.
+- **bd/beads dependency drift** (#62). Removed `bd prime --work-type/--keywords/--files` flags (they never existed), `bd sync` (now `bd dolt push/pull`, only with a Dolt remote) and other nonexistent bd commands. The docs no longer claim `bd prime` loads metaswarm's knowledge base. Minimum versions are stated: bd ≥ 1.0.4 (tested with 1.3.4), and Dolt ≥ 2.4.0 only for server mode. `tests/deps/test-dependency-drift.sh` guards against regressions.
+- **The plugin hook works when the plugin path contains a space.** `hooks/hooks.json` now quotes `${CLAUDE_PLUGIN_ROOT}`.
+- **Every command has `description:` frontmatter**, so plugin installs list all 16 commands for the model, not only 4.
+- **Documentation fixes from a pre-release review.**
+  - `docs/coverage-enforcement.md` no longer documents the removed `init --with-husky --with-ci` flags.
+  - INSTALL's superpowers command is now `claude plugin install superpowers@claude-plugins-official`.
+  - The landing page and USAGE no longer list the removed Code Reviewer.
+  - The skill, command, guide and rubric counts are corrected.
+  - The templates use `/metaswarm:status` rather than the built-in `/status`.
+  - The pr-shepherd agents name `metaswarm:pr-shepherd` instead of a `your-project:` placeholder.
+  - The manual Husky steps install `husky` before `husky init`, and the CI coverage steps name the real job keys (`coverage-simple` / `coverage-merge`) in `templates/ci-coverage-job.yml` too.
+  - CONTRIBUTING loads a local checkout with `claude --plugin-dir` (there is no `claude plugin add`).
+  - The code-review and adversarial-review rubrics name the Adversarial Reviewer as their user.
+
+### Removed
+
+- **Deprecated agent stubs `coder-agent`, `researcher-agent` and `code-review-agent`** (deprecated in 0.13.0) are removed from `agents/` and `skills/start/agents/`. Use `metaswarm:coder`, `metaswarm:researcher` and `metaswarm:adversarial-reviewer`. `bin/metaswarm-usage` still recognises the old names in historical transcripts.
+- **Legacy `adapters.<tool>.model` in `.metaswarm/external-tools.yaml`** (deprecated in 0.13.0) is no longer read. The adapters warn if it's still present; set `roles.<role>.codex|gemini` in `.metaswarm/models.yaml` instead.
+
+### Upgrade note
+
+Neither `/update` (marketplace plugin update) nor `npx metaswarm setup` (skips an instruction file that already mentions metaswarm) rewrites a project's own CLAUDE.md, AGENTS.md or GEMINI.md. Projects that already copied metaswarm's CLAUDE.md, AGENTS.md or GEMINI.md templates (or their `-append` variants) should refresh the "Workflow Enforcement" and "Quality Gates" sections from the new templates by hand.
+
+## 0.13.0
+
+### Added
+- **Phase-named subagent types with per-phase default models** (#53): every phase now spawns a role type instead of `general-purpose`. Roster: `design-reviewer`, `plan-reviewer`, `adversarial-reviewer`, `planner` (opus); `researcher`, `coder`, `pr-shepherd-agent`, `knowledge-curator-agent` (sonnet); `issue-orchestrator`, `swarm-coordinator-agent` (inherit). Every `agents/*.md` and `skills/start/agents/*.md` now has frontmatter with `name`, `description`, `model` (22 agents, +3 deprecated).
+- **`roleType("<role>")` and a resolution rule** (`guides/agent-coordination.md`, "Role type resolution"): spawn sites name a role, resolved as: use `metaswarm-<role>` if `.claude/agents/metaswarm-<role>.md` exists, otherwise `metaswarm:<role>` (the plugin default, which carries the same model), so an unconfigured project still works.
+- **`.metaswarm/models.yaml`** (from `templates/models.yaml`) is the per-project override file. Setup, `/update`, `/status` and migrate generate and check `.claude/agents/metaswarm-<role>.md` from it via `bin/metaswarm-agents.sh`.
+- **Per-call model for coder escalation**: coder retries can escalate to a stronger model by passing `model` on the spawn call, rather than via a different agent type.
+- **`bin/metaswarm-usage`**: report of subagent cost by agent type, model, phase and type × model (which type actually ran on which model), plus review-gate rounds, from Claude Code transcripts; maps legacy agent types for a pre-rollout baseline.
+- **Host docs**: "Role types on this host" tables for Codex, Gemini, OpenCode and Cursor in `skills/start/references/` and `GEMINI.md`, with research sources and what is unverified. Hosts without a per-role model get the role name passed through to their generic spawn, and the host default model applies.
+- **README "Per-phase models"** section.
+- **Delivery Scope and Overengineering policy** (#54, `guides/delivery-scope.md`): one source of truth for what may block delivery (a credible normal-usage failure, a missing or contradictory requirement, a broken key happy path, an important error or recovery-path failure), what must not expand a work unit, and the overengineering signals. Synced to the skills that need it; root and template `CLAUDE.md`/`AGENTS.md`/`GEMINI.md` carry the core rule inline plus a reference to the guide.
+- **Finding contract** (#54): every review finding carries `severity` (critical | major | minor | nit), `protects`, `evidence` and `blocker`. A finding blocks only if it is critical or major AND names what it protects; otherwise it is advisory. FAIL (or NEEDS_REVISION) requires at least one `blocker: yes` finding. Minor/nit findings become follow-ups (BEADS tasks, else a `### Follow-ups` list in the PR body). Rubrics, reviewer agents, gates and the issue-orchestrator's reviewer prompt use it.
+
+### Changed
+- **Severity-gated review iteration replaces the fixed 3-iteration cap** (#54): after each review round the orchestrator applies an ordered rule (PASS when no blockers; escalate at the 10-round `SAFETY_CAP`, or when a blocker recurs or reviewers disagree on it; otherwise fix and run a FRESH review, with an overengineering check that can downgrade blockers to follow-ups). Applies to orchestrated execution, the plan review gate, the design review gate, `/review-design`, `/start-task`, `start`, `brainstorming-extension` and the issue-orchestrator. Escalation reports group findings by severity and include round history and a recommendation; `/review-design --force-override` is offered on any escalation.
+- **VALIDATE retries are scoped** (#54): the 3-attempt Recovery Protocol (and coder model escalation) now applies only to VALIDATE failures (tests, coverage, lint, typecheck); review FAILs follow the severity rule.
+- **External-tool adapters** (#54): the Codex and Gemini review prompts ask for the 4 contract fields and return FAIL only on a `blocker: yes` finding (prompt text only; no parser change).
+- **Design review gate result schema** (#54): `ReviewResult.blockers: string[]` and the gate's inline persona schemas' `"blockers"` arrays are replaced by `findings: Finding[]` (`{ severity, protects, evidence, blocker }`); `suggestions` and `questions` are kept. Verdict words (APPROVED/NEEDS_REVISION, PASS/FAIL) are unchanged.
+- **Codex adapter passes the configured model**: `codex exec` now receives `-m <model>` when a model is configured for the role (`.metaswarm/models.yaml`) or via the legacy `adapters.codex.model`. Previously the configured model was reported but never passed. With nothing configured, no `-m` is passed and your `~/.codex/config.toml` model still applies.
+- **No validator type, deliberately**: VALIDATE is always run by the orchestrator itself ("trust nothing, verify everything" — it never delegates quality gates to a subagent and never trusts a subagent's report), so a validator agent would never be spawned. The issue's initial roster listed one; the design refined it out.
+- **Coverage gate**: `.coverage-thresholds.json` `enforcement.command` now runs the bash test suites (`tests/*/test-*.sh`), since the project has no `pnpm test:coverage`. The gate (and CI) also runs `node --test --experimental-test-coverage` for `bin/metaswarm-usage` with `--test-coverage-{lines,branches,functions}=100` (via `tests/lib/coverage-gate.sh`), so a coverage drop fails it. Developing metaswarm therefore needs Node.js >= 22.8 (the gate says so explicitly); the installer's Node 18+ runtime requirement is unchanged. The bash scripts are covered by behavioural suites; line coverage is not measured for shell (would need kcov/bashcov).
+- **CI** runs every `tests/*/test-*.sh` suite in one step plus the usage tests with coverage.
+
+### Deprecated
+- `coder-agent`, `researcher-agent` and `code-review-agent` are stubs pointing at `coder`, `researcher` and `adversarial-reviewer`. They are removed in 0.14.0.
+- `adapters.*.model` in the external-tools config is deprecated in favour of `roles.<role>.codex|gemini` in `.metaswarm/models.yaml`; the legacy key still works in 0.13.x with a stderr deprecation warning and is removed in 0.14.0.
+
+### Upgrade notes
+- **Restart Claude Code** after `.claude/agents/` is first created; agent types are loaded at session start.
+- **Claude Code v2.1.251 or later is required** for the per-agent model frontmatter behavior.
+
 ## 0.12.0
 
 ### Fixed

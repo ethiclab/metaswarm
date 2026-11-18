@@ -1,3 +1,9 @@
+---
+name: swarm-coordinator-agent
+description: "Meta-orchestrator for multiple GitHub Issues and BEADS epics in parallel. Use to coordinate a swarm across worktrees."
+model: inherit
+---
+
 # Swarm Coordinator Agent
 
 ## Role
@@ -60,20 +66,20 @@ ELSE → Task Mode (default, current behavior)
 
 ### Task Mode (Default)
 
-Fire-and-forget `Task()` subagents per worktree orchestrator. Each gets full context in its prompt. No cross-agent communication. This is the existing behavior.
+Fire-and-forget `Task()` subagents per worktree orchestrator, each with role type `roleType("issue-orchestrator")` (resolved per [Role type resolution](../guides/agent-coordination.md#role-type-resolution)). Each gets full context in its prompt. No cross-agent communication. This is the existing behavior.
 
 ### Team Mode
 
 When Team tools are available:
 
 1. **Create initiative team**: `TeamCreate("swarm-{initiative-id}")` (e.g., `swarm-auth-overhaul`)
-2. **Spawn Issue Orchestrators as named teammates**: `orch-123`, `orch-456`, etc.
+2. **Spawn Issue Orchestrators as named teammates** (type `roleType("issue-orchestrator")`): `orch-123`, `orch-456`, etc.
 3. **Broadcast conflicts**: Use `SendMessage(type: "broadcast")` to alert all orchestrators of file/schema conflicts
 4. **Receive async updates**: Orchestrators send "PR merged", "blocked", "escalation" messages
 5. **Enforce phase gates**: Via messaging (next phase starts only after all previous layer PRs merged)
 6. **Graceful shutdown**: Send `shutdown_request` to each teammate, then `TeamDelete`
 
-**MANDATORY**: Adversarial reviewers are ALWAYS fresh `Task()` instances — never teammates, never resumed. See `guides/agent-coordination.md`.
+**MANDATORY**: Adversarial reviewers are ALWAYS fresh `Task()` instances (role type `roleType("adversarial-reviewer")`) — never teammates, never resumed. See `guides/agent-coordination.md`.
 
 ---
 
@@ -110,8 +116,8 @@ When Team tools are available:
 
 **BEFORE coordinating work**, prime your context:
 
-```bash
-bd prime --work-type planning --keywords "orchestration" "coordination" "worktree"
+```text
+`/prime` (metaswarm knowledge priming) for planning work on "orchestration" "coordination" "worktree"
 ```
 
 Review the output for patterns about multi-agent coordination and conflict resolution.
@@ -127,7 +133,7 @@ Review the output for patterns about multi-agent coordination and conflict resol
 2. Swarm Coordinator receives event
 3. Check priority and existing workload
 4. Select available worktree OR queue if all busy
-5. Spawn Issue Orchestrator in selected worktree
+5. Spawn Issue Orchestrator (role type `roleType("issue-orchestrator")`) in selected worktree
 6. Record assignment in active-assignments.jsonl
 7. Post GitHub comment: "🤖 Agent claiming this work"
 ```
@@ -165,35 +171,56 @@ Trigger: Worktree becomes idle OR high-priority issue arrives
 
 ### Status Commands
 
+bd's `swarm` command only has `create`, `list`, `status` and `validate`. Assignments,
+pauses and reassignments are tracked with ordinary bd fields: the assignee names the
+worktree, and labels mark swarm state (`worktree:<name>`, `swarm:paused`).
+
 ```bash
-# View swarm status
-bd swarm status
+# View swarm status for an epic (completed / active / ready / blocked children)
+bd swarm status <epic-id> --json
 
-# List active assignments
-bd swarm assignments
+# List all swarm molecules
+bd swarm list --json
 
-# Check worktree health
-bd swarm worktrees
+# List active assignments (in-progress work and the worktree it is assigned to)
+bd list --status=in_progress --json | jq -r '.[] | "\(.id)\t\(.assignee)\t\(.title)"'
 
-# View conflict registry
-bd swarm conflicts
+# Show the work assigned to one worktree
+bd list --label "worktree:<name>" --json
+
+# Check worktree health (git's view of the worktrees)
+git worktree list --porcelain
 ```
+
+The conflict registry (which issues touch which files) is kept by this agent, not by bd.
 
 ### Control Commands
 
 ```bash
 # Pause an issue's work
-bd swarm pause <issue_number>
+bd update <task-id> --status deferred --add-label swarm:paused
 
 # Resume paused work
-bd swarm resume <issue_number>
+bd update <task-id> --status in_progress --remove-label swarm:paused
 
-# Force rebalance
-bd swarm rebalance
+# List paused work (e.g. before a rebalance)
+bd list --label swarm:paused --json
 
-# Reassign to different worktree
-bd swarm reassign <issue_number> <worktree>
+# Hand a task to a different worktree (works on bd 1.0.4 and 1.3.x)
+# 1. The holding worktree releases it:
+bd update <task-id> --status open --assignee "" --remove-label "worktree:<old-worktree>"
+# 2. The target worktree claims it atomically:
+bd update <task-id> --claim --add-label "worktree:<worktree>"
+bd show <task-id> --json
 ```
+
+Never reassign by overwriting `--assignee` from the coordinator. `--claim` is atomic in every supported bd version, so two worktrees can't both take a released task, while a direct `--assignee` overwrite can clobber a worker's live claim.
+
+- On bd 1.3.x, a direct overwrite of another actor's live `in_progress` claim is refused anyway. If the holding worktree has crashed, `bd reclaim` returns its stale lease to ready, and the target worktree then claims it. Use `--force` only for an abandoned claim that `bd reclaim` can't recover.
+- On bd 1.0.4 there is no lease or overwrite guard. If the holding worktree has crashed, confirm with the human before releasing its task on its behalf, then let the target worktree `--claim` it.
+
+Rebalancing has no bd command: list idle worktrees and ready work (`bd ready --json`),
+then hand tasks over with the release-and-claim steps above.
 
 ## Slack Integration
 

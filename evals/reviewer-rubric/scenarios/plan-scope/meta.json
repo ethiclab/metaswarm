@@ -1,0 +1,8 @@
+{
+  "agent": "metaswarm:plan-reviewer",
+  "rubric": "plan-review-rubric-adversarial",
+  "defects": {
+    "frameworkCreep": "WU2, replacing commander with yargs, was not requested: it is out of scope for adding a --json flag.",
+    "formatCreep": "WU3, adding --yaml and --csv output, was not requested: it is out of scope for adding a --json flag."
+  }
+}

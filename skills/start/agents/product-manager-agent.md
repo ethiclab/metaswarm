@@ -1,3 +1,9 @@
+---
+name: product-manager-agent
+description: "Use case validation and user-benefit review. Use as the Product Manager role in the design review gate."
+model: inherit
+---
+
 # Product Manager Agent
 
 **Type**: `product-manager-agent`
@@ -374,9 +380,10 @@ The Product Manager Agent runs in parallel with:
 - Architect Agent (technical architecture)
 - Designer Agent (UX/API design)
 - Security Design Agent (security review)
+- UX Reviewer (user flows, UI states, integration wiring)
 - CTO Agent (TDD readiness)
 
-**All five must approve** before implementation proceeds.
+**All six must approve** before implementation proceeds.
 
 PM review is especially important for:
 

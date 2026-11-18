@@ -1,0 +1,8 @@
+{
+  "agent": "metaswarm:adversarial-reviewer",
+  "rubric": "code-review-rubric",
+  "defects": {
+    "anyHigh": "parseQty's parameter is typed `any` (src/parse.ts:1), and the reply rates that finding HIGH or CRITICAL.",
+    "presenceAssert": "The test only asserts toBeDefined() on parseQty('3'), so it passes for any return value and does not check the parsed number."
+  }
+}

@@ -22,23 +22,46 @@ Every adversarial plan review produces exactly one verdict:
 
 | Verdict | Meaning | Criteria |
 | --- | --- | --- |
-| **PASS** | Plan meets its contract | Zero BLOCKING issues found |
-| **FAIL** | Plan violates its contract | One or more BLOCKING issues found |
+| **PASS** | Plan meets its contract | Zero `blocker: yes` findings |
+| **FAIL** | Plan violates its contract | At least one `blocker: yes` finding |
+
+FAIL if and only if there is at least one `blocker: yes` finding. Findings with `blocker: no` (minor, nit, or advisory critical/major) are reported but never cause FAIL.
 
 There is no "APPROVED WITH COMMENTS." There is no "CHANGES SUGGESTED." PASS or FAIL.
 
 ---
 
-## Issue Classification
+## Finding Contract
 
-Every issue found is classified as BLOCKING or WARNING:
+The policy, the finding contract and the iteration rule live in `guides/delivery-scope.md` (plugin root; `../guides/delivery-scope.md` from a skill's `rubrics/` dir). Every finding carries six fields:
 
-| Classification | Meaning | Impact on Verdict |
-| --- | --- | --- |
-| **BLOCKING** | Contract violation — plan claims X, codebase says otherwise, or user asked for X and plan omits it | Causes FAIL |
-| **WARNING** | Quality concern — not a contract violation but worth noting | Does NOT cause FAIL |
+```text
+- title: <short label, ≤ ~80 chars>
+- description: <1-3 sentences: what is wrong and why it matters>
+- severity: critical | major | minor | nit
+- protects: <credible user scenario | explicit requirement | DoD item>   # required for critical/major
+- evidence: <file:line or expected-vs-found>
+- blocker: yes | no      # yes only if severity ∈ {critical, major} AND protects is non-empty
+```
 
-**When in doubt, it's BLOCKING.** The threshold for PASS should be high. Err on the side of FAIL.
+Signal fields (see "Signal fields" in the guide) are added to the six core fields. Every finding carries `theme`; each `blocker: yes` finding also carries `needs_user`, `origin` and, when the origin is an assumption, `assumption`:
+
+```text
+- theme: <short label>       # on every finding; reuse an earlier theme label when one fits
+- needs_user: yes | no       # blockers only: yes only if just the user can answer it
+- origin: implementation | requirement | assumption   # blockers only
+- assumption: <ledger id such as A3, or a quoted decision>   # required when origin is assumption
+```
+
+Do not mark a question `needs_user` when the design's Confirmed section already answers it.
+
+- **`protects:` is required for critical and major findings.** It names the credible user scenario, explicit requirement or DoD item the finding protects.
+- **Blocker definition.** A finding is a blocker (`blocker: yes`) only if its severity is critical or major AND `protects` is non-empty. Minor and nit findings are never blockers.
+- **Unjustified findings are advisory.** A critical or major finding that cannot name what it protects is advisory, not a blocker. It becomes a follow-up and does not cause FAIL.
+- **Mapping from the check tables below.** The tables keep their wording and are read as:
+  - "BLOCKING if …" checks produce critical or major findings. They block only with `protects`. A bare "BLOCKING" entry reads the same way. A rubric entry is not itself a requirement: `protects` names a DoD item, the spec, a credible user scenario, or a written project standard (CLAUDE.md, coding standards, lint or tsconfig settings).
+  - "WARNING" checks produce minor findings.
+- **The reviewer reports; the orchestrator decides.** Whether a FAIL leads to another round, an advance or an escalation is decided by the orchestrator using the iteration rule in the guide, not by the reviewer.
 
 ---
 
@@ -61,10 +84,16 @@ Every finding — whether PASS or FAIL — requires **cited evidence**. Assertio
 
 ```markdown
 **Criterion**: "All requirements mapped to plan items"
-**Verdict**: FAIL (BLOCKING)
-**Expected**: User requirement "add rate limiting to API endpoints" mapped to a plan item
-**Found**: No plan item addresses rate limiting. User request paragraph 2 explicitly states this requirement. Plan items WU-001 through WU-004 cover auth, routing, tests, and docs only.
-**Evidence**: User request line "...and add rate limiting to all public API endpoints" has no corresponding work unit.
+**Verdict**: FAIL
+- title: Rate limiting requirement has no plan item
+- description: The user asked for rate limiting on all public API endpoints, but no work unit implements it. Executing this plan as written would ship without the requested protection.
+- severity: major
+- protects: explicit requirement "add rate limiting to all public API endpoints" (user request, paragraph 2)
+- evidence: expected a plan item for rate limiting; found none. Plan items WU-001 through WU-004 cover auth, routing, tests, and docs only.
+- blocker: yes
+- theme: requirement coverage
+- needs_user: no
+- origin: requirement
 ```
 
 ### Invalid Evidence (will be rejected)
@@ -108,13 +137,14 @@ Does the plan fully address every aspect of the user's request?
 | Edge cases considered | BLOCKING if obvious gaps | Error scenarios, empty/null states, boundary conditions, concurrent access (where relevant) |
 | Rollback/backward compatibility | WARNING | Plan should note if changes are reversible and if they break existing behavior |
 | Cross-file integration points | BLOCKING if missing | Files that import or depend on changed files must be accounted for in the plan |
+| UI integration work unit | BLOCKING if missing | When the plan builds user-facing components, a work unit wires them into the app shell (routes, layout, providers, data hooks). Component-only plans leave the feature unusable (issue #12) |
 
 **How to verify:**
 
 1. Read the user's original request and extract a numbered list of distinct requirements
 2. For each requirement, find the specific plan item(s) that address it
 3. Present the mapping as a table: requirement -> plan item(s)
-4. Any requirement without a plan item = BLOCKING FAIL
+4. Any requirement without a plan item = a major finding that protects that requirement (`blocker: yes`)
 5. For integration points, grep for imports of files being changed
 
 ### 3. Scope & Alignment (Scope & Alignment Reviewer)
@@ -145,15 +175,23 @@ Each reviewer MUST produce output in this exact format:
 ```markdown
 ## [Reviewer Name] — [PASS/FAIL]
 
-### Evidence
-- [Finding 1]: [file:line, glob result, or specific gap with evidence]
-- [Finding 2]: [file:line, glob result, or specific gap with evidence]
-- ...
+### Findings
+1. - title: <short label, ≤ ~80 chars>
+   - description: <1-3 sentences: what is wrong and why it matters>
+   - severity: critical | major | minor | nit
+   - protects: [credible user scenario, explicit requirement or DoD item; required for critical/major]
+   - evidence: [file:line, glob result, or expected-vs-found]
+   - blocker: yes | no
+   - theme: <short label>
+   - needs_user: yes | no   (blockers only)
+   - origin: implementation | requirement | assumption   (blockers only)
+   - assumption: <ledger id such as A3, or a quoted decision>   (when origin is assumption)
+2. ...
 
 ### Verdict
-[PASS: All criteria met — no blocking issues found]
+[PASS: no finding has `blocker: yes`]
 OR
-[FAIL: {numbered list of blocking issues with evidence}]
+[FAIL: at least one finding has `blocker: yes` — list the blocker findings by number]
 ```
 
 ---

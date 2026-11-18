@@ -1,5 +1,5 @@
 ---
-description: Interactive project setup — detects your project, configures metaswarm, writes project-local files
+description: "Interactive project setup: detect the project, configure metaswarm and write project-local files"
 ---
 
 # Setup

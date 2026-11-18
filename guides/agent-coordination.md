@@ -75,7 +75,7 @@ Task Mode is the baseline coordination mechanism. It uses fire-and-forget `Task(
 
 Task Mode works well for most workflows. The overhead of cold starts only becomes significant when:
 - The same agent needs to work on multiple sequential units (e.g., a coder across work units)
-- Design reviews require multiple iteration cycles (5 reviewers x 3 iterations = 15 cold starts)
+- Design reviews require multiple iteration cycles (6 reviewers x 3 iterations = 18 cold starts)
 - A PR shepherd needs to persist through a long CI/review lifecycle
 
 ---
@@ -87,7 +87,7 @@ Team Mode uses persistent teammates with context retention and direct inter-agen
 ### How It Works
 
 1. **Orchestrator creates a team** via `TeamCreate("{team-name}")`
-2. **Specialists join as named teammates** (e.g., `researcher`, `architect`, `coder`, `shepherd`)
+2. **Specialists join as named teammates** (e.g., `researcher` as `roleType("researcher")`, `architect` as `roleType("planner")`, `coder` as `roleType("coder")`, `shepherd` as `roleType("pr-shepherd-agent")`)
 3. **Teammates communicate directly** via `SendMessage` -- no orchestrator bottleneck for handoffs
 4. **Teammates retain context** across multiple work items within the same team session
 5. **Orchestrator coordinates** phase gates, conflict resolution, and shutdown
@@ -105,7 +105,7 @@ Team Mode uses persistent teammates with context retention and direct inter-agen
 
 ### Swarm Coordinator as Team Lead
 
-The Swarm Coordinator creates an initiative-level team and spawns Issue Orchestrators as persistent teammates:
+The Swarm Coordinator creates an initiative-level team and spawns Issue Orchestrators (`roleType("issue-orchestrator")`) as persistent teammates:
 
 1. `TeamCreate("swarm-{initiative-id}")`
 2. Spawn orchestrators as named teammates (`orch-123`, `orch-456`)
@@ -119,7 +119,7 @@ The Swarm Coordinator creates an initiative-level team and spawns Issue Orchestr
 The Issue Orchestrator creates an issue-level team and spawns specialist agents:
 
 1. `TeamCreate("issue-{number}")`
-2. Spawn specialists: `researcher`, `architect`, `coder`, `shepherd`
+2. Spawn specialists: `researcher` (`roleType("researcher")`), `architect` (`roleType("planner")`), `coder` (`roleType("coder")`), `shepherd` (`roleType("pr-shepherd-agent")`)
 3. Direct handoff: researcher completes, sends findings to `architect` directly
 4. Persistent coder: retains context across work units (no cold start between WU-001 and WU-002)
 5. Persistent shepherd: stays alive through the PR lifecycle, sends async status updates
@@ -130,7 +130,7 @@ The Issue Orchestrator creates an issue-level team and spawns specialist agents:
 The Design Review Gate creates a review-level team with all reviewers as persistent teammates:
 
 1. `TeamCreate("review-{design-doc-name}")`
-2. Spawn reviewers as named teammates (e.g., `pm`, `architect`, `designer`, `security`, `cto`)
+2. Spawn reviewers as named teammates (e.g., `pm`, `architect`, `designer`, `security`, `ux`, `cto`), all `roleType("design-reviewer")`
 3. Collect verdicts via `SendMessage` to the orchestrator
 4. On revision: message "revised design, please re-review" -- reviewers retain context from previous round
 5. After approval: `shutdown_request` to all reviewers, then `TeamDelete`
@@ -215,12 +215,12 @@ See Section 6. ALWAYS a fresh `Task()` instance on every single review pass. Nev
 | **Orchestrator-run validation** | Validation is always run directly by the orchestrator, never delegated         |
 | **BEADS lifecycle**             | Create --> in_progress --> close lifecycle is identical in both modes           |
 | **4-phase execution loop**      | IMPLEMENT --> VALIDATE --> ADVERSARIAL REVIEW --> COMMIT is mode-agnostic      |
-| **Knowledge priming**           | `bd prime` runs before all agent work in both modes                            |
+| **Knowledge priming**           | `/prime` runs before agent work; the beads plugin's `bd prime` adds only bd workflow context |
 | **Human checkpoints**           | Planned pauses require explicit human approval in both modes                   |
 | **Quality gates**               | Coverage, lint, typecheck, tests -- all blocking state transitions             |
 | **Pipeline pattern**            | Push + PR + shepherd immediately after each agent completes, don't batch       |
 | **Phase gate rule**             | Next phase starts only after ALL previous phase PRs are squash-merged          |
-| **Max retry + escalation**      | 3 retries per gate, then escalate to human with full failure history           |
+| **Max retry + escalation**      | VALIDATE: 3 attempts; review: severity-gated iteration, cap 10 rounds; then escalate to human with full failure history |
 | **File scope verification**     | `git diff --name-only` check after every implementation                        |
 
 ### Invariant Rationale
@@ -234,6 +234,33 @@ These invariants exist because they encode hard-won lessons about multi-agent co
 - **Human checkpoints** keep humans in the loop at critical decision points
 - **Quality gates as blocking** prevents "I'll fix it later" accumulation of tech debt
 - **Max retry + escalation** prevents infinite loops when an agent cannot solve a problem
+
+---
+
+## Role type resolution
+
+Every `Task()` spawn names a role type instead of the generic built-in agent type, so each phase gets its own default model (set in the agent's frontmatter). Skills write the type as `roleType("<role>")`, and the orchestrator resolves it with one rule:
+
+> **Role type resolution**: use `metaswarm-<role>` if `.claude/agents/metaswarm-<role>.md` exists, otherwise `metaswarm:<role>`.
+
+The `metaswarm-<role>` project files are generated by `/setup` and `/update` from `.metaswarm/models.yaml`. If the orchestrator misses this rule, the spawn falls back to the plugin default (`metaswarm:<role>`), which already carries the correct model. It degrades to the plugin defaults rather than breaking.
+
+### Roster
+
+| Role | Phase | Default model |
+|---|---|---|
+| `design-reviewer` | design review gate (role in prompt: PM, Architect, Designer, Security, UX, CTO) | opus |
+| `plan-reviewer` | plan review gate (role in prompt: Feasibility, Completeness, Scope & Alignment) | opus |
+| `researcher` | research | sonnet |
+| `planner` | plan / decompose | opus |
+| `coder` | IMPLEMENT | sonnet |
+| `adversarial-reviewer` | ADVERSARIAL REVIEW (also code review and security audit) | opus |
+| `pr-shepherd-agent` | PR monitoring | sonnet |
+| `knowledge-curator-agent` | reflect | sonnet |
+| `issue-orchestrator` | orchestration | inherit |
+| `swarm-coordinator-agent` | orchestration | inherit |
+
+Team Mode teammates use the same role types (the `TeamCreate` member type is the role type). Adversarial reviewers are always fresh `Task()` instances in both modes, using the `adversarial-reviewer` type. A per-call `model` parameter still overrides the default (used for coder escalation).
 
 ---
 

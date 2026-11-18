@@ -1,3 +1,9 @@
+---
+name: security-design-agent
+description: "Security review of designs before implementation. Use as the Security role in the design review gate."
+model: inherit
+---
+
 # Security Design Agent
 
 **Type**: `security-design-agent`
@@ -40,8 +46,8 @@ Triggered when:
 
 ### Step 0: Knowledge Priming (CRITICAL)
 
-```bash
-bd prime --work-type review --keywords "security authentication authorization"
+```text
+`/prime` (metaswarm knowledge priming) for review work on "security authentication authorization"
 ```
 
 ### Step 1: Gather Context
@@ -431,9 +437,10 @@ The Security Design Agent runs in parallel with:
 - Product Manager Agent (use case/user benefit review)
 - Architect Agent (technical architecture)
 - Designer Agent (UX/API design)
+- UX Reviewer (user flows, UI states, integration wiring)
 - CTO Agent (TDD readiness)
 
-**All five must approve** before implementation proceeds.
+**All six must approve** before implementation proceeds.
 
 Security review is especially important for designs that:
 

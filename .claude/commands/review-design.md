@@ -1,6 +1,10 @@
+---
+description: Trigger the parallel design review gate with 6 specialist reviewers
+---
+
 # Review Design Command
 
-Run the design review gate on a design document to get feedback from Product Manager, Architect, Designer, Security Design, and CTO agents.
+Run the design review gate on a design document to get feedback from Product Manager, Architect, Designer, Security Design, UX Reviewer and CTO agents.
 
 ## Usage
 
@@ -24,13 +28,14 @@ Run the design review gate on a design document to get feedback from Product Man
 ## What This Does
 
 1. **Validates the design document exists** and is in the expected format
-2. **Spawns five review agents in parallel**:
+2. **Spawns six review agents in parallel** (each `roleType("design-reviewer")`, role in the prompt):
    - **Product Manager Agent** - Validates use cases and user benefits
    - **Architect Agent** - Reviews technical architecture
    - **Designer Agent** - Reviews UX, API design, developer experience
    - **Security Design Agent** - Reviews security threats and mitigations
+   - **UX Reviewer** - Reviews user flows, empty/loading/error states and integration wiring
    - **CTO Agent** - Reviews TDD readiness, codebase alignment
-3. **Aggregates results** from all five agents
+3. **Aggregates results** from all six agents
 4. **Reports outcome** with blockers, suggestions, and next steps
 
 ## Arguments
@@ -38,9 +43,38 @@ Run the design review gate on a design document to get feedback from Product Man
 | Argument              | Description                                                  |
 | --------------------- | ------------------------------------------------------------ |
 | `<path>`              | Path to design document (required unless --latest)           |
-| `--latest`            | Review most recent design doc in docs/plans/                 |
+| `--latest`            | Review the newest dated design doc in `docs/plans/` or `docs/superpowers/specs/` |
 | `--iteration N`       | Mark as iteration N of review cycle                          |
-| `--skip-agent <name>` | Skip specific agent (pm, architect, designer, security, cto) |
+| `--skip-agent <name>` | Skip specific agent (pm, architect, designer, security, ux, cto) |
+
+### Finding the latest design doc
+
+`--latest` looks at `docs/plans/*-design.md` and `docs/superpowers/specs/*-design.md`, considers only names that start with `YYYY-MM-DD-`, and picks the newest by that date prefix (file modification time is unreliable after a clone). Ties on date are broken by the rest of the basename, then by the full path.
+
+<!-- latest-design-doc:start -->
+```bash
+(
+  # Absent folders are skipped; a folder that exists but can't be read is an error.
+  list=$(
+    for d in docs/plans docs/superpowers/specs; do
+      [ -d "$d" ] || continue
+      find "$d" -maxdepth 1 -type f \
+        -name '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]-*-design.md' ||
+        { echo "Cannot read $d" >&2; exit 2; }
+    done
+  ) || exit 2
+  latest=$(printf '%s\n' "$list" |
+    awk 'NF { n = $0; sub(".*/", "", n); print n "\t" $0 }' |
+    LC_ALL=C sort | tail -n 1 | cut -f2)
+  if [ -n "$latest" ]; then
+    printf '%s\n' "$latest"
+  else
+    echo "No design doc found in docs/plans/ or docs/superpowers/specs/"
+    false
+  fi
+)
+```
+<!-- latest-design-doc:end -->
 
 ## Review Verdicts
 
@@ -58,20 +92,21 @@ One or more agents found blocking issues. Output includes:
 
 - List of blocking issues by agent
 - Questions requiring clarification
-- Iteration count (max 3 before escalation)
+- Round count (severity-gated iteration, cap 10 rounds; see the metaswarm plugin's `guides/delivery-scope.md`)
+- When a Clarify signal fires (a blocker only the user can answer, no convergence, fix-induced blockers or a recurring theme), the gate stops and posts a Clarification report instead of iterating
 
 ### ESCALATED
 
-After 3 iterations without approval:
+Reached via the severity rule: an escalate condition (a recurring or disputed blocker, or a blocker that survives the overengineering check) or the 10-round cap:
 
 - Summary of remaining blockers
-- Options: Override / Defer / Cancel
+- Options: Revise / Clarify the requirement / re-brainstorm / Narrow scope / Defer / Cancel. Escalation never approves: a revised or narrowed design gets a fresh review round
 
 ## Integration
 
-### After Brainstorming
+### After a Project-Sized Design Doc Is Committed
 
-This command is automatically invoked by the brainstorming extension skill after `superpowers:brainstorming` commits a design document.
+This command is automatically invoked by the brainstorming extension skill when brainstorming commits a project-sized design doc (see the metaswarm plugin's `guides/workflow-enforcement.md`).
 
 ### Manual Invocation
 
@@ -127,6 +162,15 @@ Focuses on:
 - Data protection and privacy
 - OWASP Top 10 compliance
 
+### UX Reviewer Agent
+
+Focuses on (rubric: `rubrics/ux-review-rubric.md`; a design with no user-facing UI is approved when the task needs none):
+
+- User flows: each has a trigger and a visible outcome
+- Screens described with a component hierarchy or text wireframe
+- Empty, loading and error states for each view
+- The integration wiring that connects the components to the app shell (the integration work unit is checked at plan review)
+
 ### CTO Agent
 
 Focuses on:
@@ -140,7 +184,7 @@ Focuses on:
 
 The review gate passes when:
 
-- [ ] All five agents return APPROVED
+- [ ] All six agents return APPROVED
 - [ ] All blocking issues resolved
 - [ ] All clarifying questions answered
 - [ ] Design document updated with revisions (if any)
@@ -152,7 +196,7 @@ The review gate passes when:
 Ensure the path is correct and the file exists:
 
 ```bash
-ls -la docs/plans/
+ls -la docs/plans/ docs/superpowers/specs/
 ```
 
 ### "Agent timed out"
@@ -165,7 +209,7 @@ Individual agents have 3-minute timeout. If timeout occurs:
 
 ### "Stuck in review loop"
 
-After 3 iterations, use `--force-override` to proceed anyway (documents technical debt).
+On any escalation (including the 10-round cap), the human chooses Revise, Clarify the requirement / re-brainstorm, Narrow scope, Defer or Cancel. When a Clarify signal fires first, the gate stops with a Clarification report and waits for your answer. There is no way to advance with open blockers: a revised or narrowed design gets a fresh review round and passes only by that round.
 
 ## Related Commands
 
@@ -175,6 +219,6 @@ After 3 iterations, use `--force-override` to proceed anyway (documents technica
 
 ## Related Skills
 
-- `your-project:design-review-gate` - The gate implementation
-- `your-project:brainstorming-extension` - Auto-triggers this after brainstorming
+- `metaswarm:design-review-gate` - The gate implementation
+- `metaswarm:brainstorming-extension` - Auto-triggers this when brainstorming commits a project-sized design doc
 - `superpowers:brainstorming` - The design creation skill

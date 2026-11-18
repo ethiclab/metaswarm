@@ -20,7 +20,7 @@ LOG_DIR="${HOME}/.claude/sessions"
 # parse_args()
 #   Parses common CLI arguments into shell variables.
 #   Sets: XT_WORKTREE, XT_PROMPT_FILE, XT_RUBRIC_FILE, XT_SPEC_FILE,
-#         XT_ATTEMPT, XT_TIMEOUT, XT_CONTEXT_DIR
+#         XT_ATTEMPT, XT_TIMEOUT, XT_CONTEXT_DIR, XT_ROLE
 # ---------------------------------------------------------------------------
 parse_args() {
   # Defaults
@@ -31,6 +31,7 @@ parse_args() {
   XT_ATTEMPT="1"
   XT_TIMEOUT="300"
   XT_CONTEXT_DIR=""
+  XT_ROLE=""
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -62,11 +63,86 @@ parse_args() {
         XT_CONTEXT_DIR="${2:-}"
         shift 2
         ;;
+      --role)
+        XT_ROLE="${2:-}"
+        shift 2
+        ;;
       *)
         shift
         ;;
     esac
   done
+}
+
+# ---------------------------------------------------------------------------
+# configured_model()
+#   Prints the explicitly configured model for an adapter, or "" if none. Order:
+#     1. .metaswarm/models.yaml roles.<role>.<tool> (via the metaswarm-agents.sh
+#        resolve process; only when a role is given)
+#   The legacy .metaswarm/external-tools.yaml adapters.<tool>.model was removed in
+#   0.14.0: it's ignored, with a warning on stderr if still present.
+#   resolve_model() wraps this and falls back to the adapter's DEFAULT_MODEL.
+#   Usage: configured_model <tool> [role]   (prints "" when nothing is configured)
+#   Prints the model. Returns 2 (message on stderr) for an unknown role.
+# ---------------------------------------------------------------------------
+configured_model() {
+  local tool="${1:?configured_model: tool required}"
+  local role="${2:-}"
+  local model="" resolver="" err_file rc=0
+
+  if [[ -n "$role" ]]; then
+    resolver="$(command -v metaswarm-agents.sh 2>/dev/null || true)"
+    if [[ -z "$resolver" ]]; then
+      # Resolve symlinks physically: the npm/Codex installer symlinks skills/<dir> elsewhere
+      local here candidate
+      here="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+      candidate="$(cd -P "$here/../../.." 2>/dev/null && pwd -P)/bin/metaswarm-agents.sh"
+      [[ -f "$candidate" ]] && resolver="$candidate"
+      if [[ -z "$resolver" && -n "${CLAUDE_PLUGIN_ROOT:-}" && -f "$CLAUDE_PLUGIN_ROOT/bin/metaswarm-agents.sh" ]]; then
+        resolver="$CLAUDE_PLUGIN_ROOT/bin/metaswarm-agents.sh"
+      fi
+    fi
+    if [[ -z "$resolver" ]]; then
+      printf 'Warning: --role %s ignored: metaswarm-agents.sh not found (put the metaswarm plugin bin/ on PATH or set CLAUDE_PLUGIN_ROOT); using fallback model\n' "$role" >&2
+    fi
+    if [[ -n "$resolver" ]]; then
+      err_file="$(mktemp -t "xt-resolve-XXXXXX")"
+      model="$(bash "$resolver" resolve "$role" "$tool" 2>"$err_file")" || rc=$?
+      if [[ "$rc" -ne 0 ]]; then
+        printf 'Error: --role %s: %s\n' "$role" "$(cat "$err_file")" >&2
+        rm -f "$err_file"
+        return 2
+      fi
+      rm -f "$err_file"
+    fi
+  fi
+
+  if [[ -z "$model" ]]; then
+    # adapters.<tool>.model in .metaswarm/external-tools.yaml was removed in 0.14.0 (deprecated in
+    # 0.13.0). It's no longer read; warn if it's still present so a model choice isn't lost silently.
+    local project legacy_file
+    project="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+    legacy_file="${project}/.metaswarm/external-tools.yaml"
+    if [[ -f "$legacy_file" ]] && awk -v t="$tool" '
+        /^adapters:/ { a = 1; next }
+        /^[^ #]/ { a = 0; s = 0 }
+        a && $0 ~ "^  " t ":" { s = 1; next }
+        a && /^  [A-Za-z]/ { s = 0 }
+        a && s && /^    model:/ { found = 1; exit }
+        END { exit found ? 0 : 1 }' "$legacy_file"; then
+      printf 'Warning: adapters.%s.model in .metaswarm/external-tools.yaml is no longer read (removed in 0.14.0); set roles.<role>.%s in .metaswarm/models.yaml instead\n' \
+        "$tool" "$tool" >&2
+    fi
+  fi
+
+  printf '%s' "$model"
+}
+
+# resolve_model <tool> [role]: configured model, else the adapter's built-in DEFAULT_MODEL
+resolve_model() {
+  local m
+  m="$(configured_model "$@")" || return $?
+  printf '%s' "${m:-$DEFAULT_MODEL}"
 }
 
 # ---------------------------------------------------------------------------

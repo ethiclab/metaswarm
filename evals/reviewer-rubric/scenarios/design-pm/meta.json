@@ -1,0 +1,8 @@
+{
+  "agent": "metaswarm:design-reviewer",
+  "rubric": "product-manager-agent",
+  "defects": {
+    "noUseCases": "The design gives no user use cases or user problem for PDF export (who needs it and why); the goal only restates the feature.",
+    "featureCreep": "The theming engine and the plugin marketplace go beyond the goal (PDF export for reports) and should be cut or split into separate work."
+  }
+}

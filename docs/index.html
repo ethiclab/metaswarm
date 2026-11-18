@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>metaswarm - Multi-Agent Orchestration for Claude Code, Gemini CLI, Codex CLI, and OpenCode</title>
-  <meta name="description" content="A self-improving multi-agent orchestration framework for Claude Code, Gemini CLI, Codex CLI, and OpenCode. 18 agents, 13 skills, 15 commands. TDD, cross-model adversarial review, spec-driven development. Production-proven.">
+  <title>metaswarm - Multi-Agent Orchestration for Claude Code</title>
+  <meta name="description" content="A self-improving multi-agent orchestration framework for Claude Code, Gemini CLI, Codex CLI, and OpenCode. 23 agents, 14 skills, 16 commands. TDD, cross-model adversarial review, spec-driven development. Production-proven.">
   <style>
     :root {
       --bg: #ffffff;
@@ -397,7 +397,7 @@
 
   <header>
     <h1><a href="https://github.com/dsifry/metaswarm" style="color: inherit; text-decoration: none;"><span>meta</span>swarm</a></h1>
-    <p class="tagline">A self-improving multi-agent orchestration framework for Claude Code, Gemini CLI, Codex CLI, and OpenCode. 18 specialized agents coordinate through the full development lifecycle, from GitHub issue to merged PR, with TDD, cross-model adversarial review, and spec-driven development.</p>
+    <p class="tagline">A self-improving multi-agent orchestration framework for Claude Code, Gemini CLI, Codex CLI, and OpenCode. 23 agents coordinate through the full development lifecycle, from GitHub issue to merged PR, with TDD, cross-model adversarial review, and spec-driven development.</p>
   </header>
 
   <!-- QUICK INSTALL -->
@@ -476,7 +476,7 @@ Definition of Done:
 6. CI pipeline for tests and lint
 
 Use the full metaswarm orchestration workflow:
-research, plan, design review gate, decompose into work units,
+research, plan, plan review gate, design review gate, decompose into work units,
 and execute each through the 4-phase loop. Set human checkpoints
 after the database schema and after the AI integration.
 When all work units pass, create a PR.</code></pre>
@@ -560,7 +560,7 @@ When all work units pass, create a PR.</code></pre>
       </div>
     </div>
 
-    <p>The Design Review Gate is the part that surprised me. Six agents review the plan simultaneously, each from a different perspective &mdash; including a UX Reviewer that verifies user flows and integration work units. All six have to approve before implementation starts. If they do not agree after three rounds, the system escalates to a human. This catches real problems. Not theoretical ones.</p>
+    <p>The Design Review Gate is the part that surprised me. Six agents review the plan simultaneously, each from a different perspective &mdash; including a UX Reviewer that verifies user flows and integration work units. All six have to approve before implementation starts. Iteration is severity-gated: only justified critical or major findings (<code>blocker: yes</code>) trigger another round, minor ones become follow-ups, and the system escalates to a human when a blocker persists, reviewers split on whether a finding blocks, or the 10-round cap is hit. This catches real problems. Not theoretical ones.</p>
   </section>
 
   <!-- SELF-LEARNING -->
@@ -573,7 +573,7 @@ When all work units pass, create a PR.</code></pre>
       <li><strong>You disagreed.</strong> When you override Claude's recommendation, the system captures your preferred approach so agents align with your intent in future sessions.</li>
       <li><strong>You did something manually that should be automated.</strong> Repeated manual steps get flagged as workflow candidates.</li>
     </ul>
-    <p>The knowledge base can grow to hundreds or thousands of entries without filling your context window, because agents do not load all of it. <code>bd prime</code> uses selective retrieval, filtered by the files you are touching, the keywords that matter, and the type of work you are doing. You get the five gotchas relevant to the auth middleware you are about to change, not the entire institutional memory of the project.</p>
+    <p>The knowledge base can grow to hundreds or thousands of entries without filling your context window, because agents do not load all of it. metaswarm's <code>/prime</code> command filters it with <code>jq</code> by the files you are touching, the keywords that matter, and the type of work you are doing. You get the five gotchas relevant to the auth middleware you are about to change, not the entire institutional memory of the project.</p>
   </section>
 
   <!-- ORCHESTRATED EXECUTION -->
@@ -601,7 +601,7 @@ When all work units pass, create a PR.</code></pre>
       </div>
     </div>
 
-    <p>On failure: fix, re-validate, spawn a <strong>fresh</strong> reviewer (never the same one), and retry up to three times before escalating to a human with the full failure history. The fresh reviewer rule matters: without it, the reviewer checks "did they fix what I found?" instead of independently verifying the contract. Anchoring bias is real, even for AI agents.</p>
+    <p>On failure: fix, re-validate, spawn a <strong>fresh</strong> reviewer (never the same one), and let the severity rule decide the next step: another round only while justified critical or major findings (<code>blocker: yes</code>) remain, minor findings filed as follow-ups, and escalation to a human (with findings grouped by severity) when a blocker persists or the 10-round cap is hit. When a blocker only you can answer, or the rounds stop converging, the gate stops earlier with a misunderstanding analysis and a Clarification report, and an interrupted gate resumes from its saved round history. The fresh reviewer rule matters: without it, the reviewer checks "did they fix what I found?" instead of independently verifying the contract. Anchoring bias is real, even for AI agents.</p>
     <p>This is not needed for every task. A typo fix or a small bug does not need a 4-phase loop. But for multi-unit features with a spec, risky schema changes, or anything where "it works, trust me" is not good enough, orchestrated execution is the difference between shipping and hoping.</p>
   </section>
 
@@ -650,20 +650,20 @@ When all work units pass, create a PR.</code></pre>
     <h2>Components</h2>
     <div class="features">
       <div class="feature">
-        <h4>18 Agent Personas</h4>
-        <p>Researcher, Architect, PM, Designer, Security, CTO, Coder, Code Reviewer, Security Auditor, PR Shepherd, Test Automator, Knowledge Curator, and more. Each has a defined role, process, and output format.</p>
+        <h4>23 Agents</h4>
+        <p>Researcher, Planner, Architect, PM, Designer, Security, UX Reviewer, CTO, Design Reviewer, Plan Reviewer, Coder, Adversarial Reviewer, Security Auditor, PR Shepherd, Release Engineer, Test Automator, Knowledge Curator, and more. Each has a defined role, process, and output format.</p>
       </div>
       <div class="feature">
-        <h4>13 Orchestration Skills</h4>
-        <p>Orchestrated execution, design review gate, plan review gate, PR shepherd, PR comment handling, external AI tools delegation, visual review, brainstorming extension, issue creation, interactive setup, migration, status diagnostics, and the main start workflow.</p>
+        <h4>14 Orchestration Skills</h4>
+        <p>Orchestrated execution, design review gate, plan review gate, PR shepherd, PR comment handling, external AI tools delegation, visual review, brainstorming extension, issue creation, interactive setup, migration, status diagnostics, session handoff, and the main start workflow.</p>
       </div>
       <div class="feature">
-        <h4>15 Slash Commands</h4>
-        <p><code>/metaswarm:setup</code>, <code>/metaswarm:update</code>, <code>/metaswarm:status</code>, <code>/metaswarm:start-task</code>, <code>/metaswarm:start</code>, <code>/metaswarm:prime</code>, <code>/metaswarm:review-design</code>, <code>/metaswarm:brainstorm</code>, <code>/metaswarm:self-reflect</code>, <code>/metaswarm:pr-shepherd</code>, <code>/metaswarm:create-issue</code>, <code>/metaswarm:handle-pr-comments</code>, <code>/metaswarm:external-tools-health</code>.</p>
+        <h4>16 Slash Commands</h4>
+        <p><code>/metaswarm:setup</code>, <code>/metaswarm:update</code>, <code>/metaswarm:status</code>, <code>/metaswarm:start-task</code>, <code>/metaswarm:start</code>, <code>/metaswarm:prime</code>, <code>/metaswarm:review-design</code>, <code>/metaswarm:brainstorm</code>, <code>/metaswarm:self-reflect</code>, <code>/metaswarm:pr-shepherd</code>, <code>/metaswarm:create-issue</code>, <code>/metaswarm:handle-pr-comments</code>, <code>/metaswarm:external-tools-health</code>, <code>/metaswarm:handoff</code>, plus the deprecated aliases <code>/metaswarm:metaswarm-setup</code> and <code>/metaswarm:metaswarm-update-version</code>.</p>
       </div>
       <div class="feature">
-        <h4>8 Quality Rubrics</h4>
-        <p>Standardized review criteria for code, architecture, security, test coverage, implementation plans, adversarial plan review, adversarial spec compliance, and external tool review.</p>
+        <h4>10 Quality Rubrics</h4>
+        <p>Standardized review criteria for code, architecture, security, test coverage, implementation plans, adversarial plan review, adversarial spec compliance, external tool review, UX review, and release engineering.</p>
       </div>
       <div class="feature">
         <h4>Coverage Enforcement</h4>
@@ -683,7 +683,7 @@ When all work units pass, create a PR.</code></pre>
       </div>
       <div class="feature">
         <h4>Plan Review Gate</h4>
-        <p>3 adversarial reviewers &mdash; Feasibility, Completeness, and Scope &amp; Alignment &mdash; validate every implementation plan before it reaches the Design Review Gate. All 3 must approve.</p>
+        <p>3 adversarial reviewers &mdash; Feasibility, Completeness, and Scope &amp; Alignment &mdash; validate every implementation plan before it is presented. In full orchestration that is before the Design Review Gate, which then reviews the plan; on the <code>/start-task</code> path the Design Review Gate has already reviewed the design doc. All 3 must approve.</p>
       </div>
       <div class="feature">
         <h4>Claude-Guided Setup</h4>
@@ -694,16 +694,16 @@ When all work units pass, create a PR.</code></pre>
         <p>Run <code>/metaswarm:update</code> to check for new versions, view the changelog, update all component files, and re-detect your project context. User customizations are preserved.</p>
       </div>
       <div class="feature">
-        <h4>6 Development Guides</h4>
-        <p>Comprehensive reference guides for coding standards, testing patterns, git workflow, worktree development, build validation, and agent coordination. Agents load them automatically when relevant.</p>
+        <h4>8 Development Guides</h4>
+        <p>Comprehensive reference guides for coding standards, testing patterns, git workflow, worktree development, build validation, agent coordination, delivery scope (the review severity rule), and workflow enforcement. Agents load them automatically when relevant.</p>
       </div>
       <div class="feature">
         <h4>Workflow Enforcement</h4>
-        <p>Mandatory intercepts at every handoff point ensure quality gates are never bypassed. After brainstorming &rarr; design review gate. After planning &rarr; plan review gate. Before PR &rarr; self-reflect + knowledge capture. Users choose execution method (orchestrated vs lightweight).</p>
+        <p>Mandatory intercepts at every handoff point ensure quality gates are never bypassed. Project-sized design doc committed &rarr; design review gate (<a href="https://github.com/dsifry/metaswarm/blob/main/guides/workflow-enforcement.md">details</a>). Plan written &rarr; plan review gate, before writing-plans presents the plan (<a href="https://github.com/dsifry/metaswarm/blob/main/guides/workflow-enforcement.md">details</a>). Before PR &rarr; self-reflect + knowledge capture. Users choose execution method (orchestrated vs lightweight).</p>
       </div>
       <div class="feature">
         <h4>Context Recovery</h4>
-        <p>Approved plans and execution state persist to <code>.beads/</code> on disk. After context compaction or session interruption, <code>bd prime --work-type recovery</code> reloads everything: the plan, completed work, current position. No re-running expensive review gates.</p>
+        <p>Approved plans and execution state persist to <code>.beads/</code> on disk. After context compaction or session interruption, the orchestrator reads them back from disk (the plan, completed work, current position) and runs <code>/prime</code> for the relevant knowledge. No re-running expensive review gates.</p>
       </div>
     </div>
   </section>
@@ -720,15 +720,20 @@ When all work units pass, create a PR.</code></pre>
         <tr><td>Swarm Coordinator</td><td>Meta</td><td>Assigns work to worktrees, manages parallel execution</td></tr>
         <tr><td>Issue Orchestrator</td><td>Meta</td><td>Decomposes issues into tasks, manages phase handoffs</td></tr>
         <tr><td>Researcher</td><td>Research</td><td>Explores codebase, discovers patterns and dependencies</td></tr>
+        <tr><td>Planner</td><td>Planning</td><td>Turns research into an implementation plan and work units</td></tr>
         <tr><td>Architect</td><td>Planning</td><td>Designs implementation plan and service structure</td></tr>
         <tr><td>Product Manager</td><td>Review</td><td>Validates use cases, scope, and user benefit</td></tr>
         <tr><td>Designer</td><td>Review</td><td>Reviews API/UX design and consistency</td></tr>
         <tr><td>Security Design</td><td>Review</td><td>Threat modeling, STRIDE analysis, auth review</td></tr>
+        <tr><td>UX Reviewer</td><td>Review</td><td>User flows, empty/loading/error states, integration wiring</td></tr>
         <tr><td>CTO</td><td>Review</td><td>TDD readiness, codebase alignment, final approval</td></tr>
+        <tr><td>Design Reviewer</td><td>Review</td><td>Runs each Design Review Gate role (PM, Architect, Designer, Security, UX Reviewer, CTO) from the prompt</td></tr>
+        <tr><td>Plan Reviewer</td><td>Review</td><td>Plan Review Gate reviewer: Feasibility, Completeness, Scope &amp; Alignment</td></tr>
         <tr><td>Coder</td><td>Implement</td><td>TDD implementation with 100% coverage</td></tr>
-        <tr><td>Code Reviewer</td><td>Review</td><td>Dual-mode: collaborative (suggestions) or adversarial (spec compliance)</td></tr>
+        <tr><td>Adversarial Reviewer</td><td>Review</td><td>Fresh-context review against the spec and rubrics: collaborative (suggestions) or adversarial (spec compliance)</td></tr>
         <tr><td>Security Auditor</td><td>Review</td><td>Vulnerability scanning, OWASP checks</td></tr>
         <tr><td>PR Shepherd</td><td>Delivery</td><td>CI monitoring, comment handling, thread resolution</td></tr>
+        <tr><td>Release Engineer</td><td>Delivery</td><td>Safe delivery from merge through production verification</td></tr>
         <tr><td>Knowledge Curator</td><td>Learning</td><td>Extracts learnings, updates knowledge base</td></tr>
         <tr><td>Test Automator</td><td>Implement</td><td>Test generation and coverage enforcement</td></tr>
         <tr><td>Metrics</td><td>Support</td><td>Analytics and weekly reports</td></tr>
@@ -766,7 +771,7 @@ When all work units pass, create a PR.</code></pre>
 
     <p>The guided setup (<code>/metaswarm:setup</code>) detects your test runner and configures coverage enforcement automatically. For manual setup, copy the template:</p>
     <pre><code><span class="cmd">cp</span> templates/coverage-thresholds.json .coverage-thresholds.json</code></pre>
-    <p>The thresholds work with any test runner. The setup skill maps your detected test runner to the correct coverage command automatically &mdash; <code>pnpm test:coverage</code>, <code>pytest --cov</code>, <code>cargo tarpaulin</code>, <code>go test -cover</code>, or whatever your project uses. See <a href="https://github.com/dsifry/metaswarm/blob/main/docs/coverage-enforcement.md">coverage-enforcement.md</a> for the full setup guide.</p>
+    <p>The thresholds work with any test runner. The setup skill maps your detected test runner to the correct coverage command automatically &mdash; <code>pnpm test:coverage</code>, <code>pytest --cov</code>, <code>cargo tarpaulin</code>, <code>go run .metaswarm/go-coverage-gate.go</code> (a gate program setup writes, since <code>go test</code> has no threshold flag), or whatever your project uses. See <a href="https://github.com/dsifry/metaswarm/blob/main/docs/coverage-enforcement.md">coverage-enforcement.md</a> for the full setup guide.</p>
   </section>
 
   <!-- SETUP -->
@@ -775,7 +780,7 @@ When all work units pass, create a PR.</code></pre>
     <h3>Prerequisites</h3>
     <ul>
       <li><a href="https://docs.anthropic.com/en/docs/claude-code">Claude Code</a></li>
-      <li><a href="https://github.com/steveyegge/beads">BEADS CLI</a> (<code>bd</code>) v0.40+ (optional &mdash; for knowledge base)</li>
+      <li><a href="https://github.com/steveyegge/beads">BEADS CLI</a> (<code>bd</code>) &ge; 1.0.4 (optional &mdash; for task tracking)</li>
       <li><a href="https://github.com/obra/superpowers">Superpowers</a> plugin (optional but recommended)</li>
       <li>GitHub CLI (<code>gh</code>)</li>
       <li>Node.js 18+</li>
@@ -827,10 +832,10 @@ When all work units pass, create a PR.</code></pre>
     <p>Every feature starts as a BEADS epic with subtasks. Dependencies between tasks enforce ordering. The orchestrator checks <code>bd ready</code> to find unblocked work, updates task status as agents complete phases, and closes the epic when the PR merges. All of this is stored in a SQLite database inside your repo, synced through git.</p>
 
     <h3>Knowledge base is selective, not exhaustive</h3>
-    <p>When an agent starts work, <code>bd prime</code> loads knowledge filtered by the files being touched and the type of work being done. A coder working on auth routes gets auth-related gotchas. A security reviewer gets the OWASP-related patterns. The knowledge base can grow to thousands of entries without any agent needing to read all of them.</p>
+    <p>When an agent starts work, metaswarm's <code>/prime</code> command loads knowledge filtered by the files being touched and the type of work being done. A coder working on auth routes gets auth-related gotchas. A security reviewer gets the OWASP-related patterns. The knowledge base can grow to thousands of entries without any agent needing to read all of them.</p>
 
     <h3>Human checkpoints are proactive, not reactive</h3>
-    <p>The design review gate gives agents three iterations to converge. If they cannot agree, or if requirements are ambiguous, the system stops and asks a human. But orchestrated execution goes further: you define <strong>planned checkpoints</strong> in the spec (after schema changes, after security-sensitive code, at natural boundaries). The orchestrator pauses at those points and presents a report. It waits for you. This is not a notification. It is a gate. The system does not guess when it should ask, and it does not continue without your explicit approval.</p>
+    <p>The design review gate iterates only while reviewers report real blockers (findings that name the user scenario or requirement they protect), with a safety cap of 10 rounds. If they cannot agree, or if requirements are ambiguous, the system stops and asks a human. If the rounds stop converging, it first analyses how the request may have been misread and asks the human to clarify it. But orchestrated execution goes further: you define <strong>planned checkpoints</strong> in the spec (after schema changes, after security-sensitive code, at natural boundaries). The orchestrator pauses at those points and presents a report. It waits for you. This is not a notification. It is a gate. The system does not guess when it should ask, and it does not continue without your explicit approval.</p>
   </section>
 
   <!-- CODE REVIEW INTEGRATION -->
@@ -867,7 +872,7 @@ When all work units pass, create a PR.</code></pre>
   <section>
     <h2>Built On</h2>
     <div class="callout">
-      <p><strong><a href="https://github.com/steveyegge/beads">BEADS</a></strong> by Steve Yegge. Git-native, AI-first issue tracking. The coordination backbone for all task management, dependency tracking, and knowledge priming. BEADS made it possible to treat issue tracking as part of the codebase instead of an external service.</p>
+      <p><strong><a href="https://github.com/steveyegge/beads">BEADS</a></strong> by Steve Yegge. Git-native, AI-first issue tracking. The coordination backbone for all task management and dependency tracking. BEADS made it possible to treat issue tracking as part of the codebase instead of an external service.</p>
     </div>
     <div class="callout">
       <p><strong><a href="https://github.com/obra/superpowers">Superpowers</a></strong> by Jesse Vincent and contributors. The agentic skills framework that provides foundational workflows for brainstorming, test-driven development, systematic debugging, and plan writing. Superpowers proved that disciplined agent workflows are not overhead. They are what make autonomous development reliable.</p>

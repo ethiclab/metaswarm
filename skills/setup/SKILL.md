@@ -23,7 +23,7 @@ fi
 if [ -z "$PLUGIN_ROOT" ] && [ -f "$(pwd)/lib/setup-mandatory-files.sh" ]; then
   PLUGIN_ROOT="$(pwd)"
 fi
-bash "${PLUGIN_ROOT}/lib/setup-mandatory-files.sh" "$(pwd)" <threshold> "<coverage-command>" --platform <platform>
+bash "${PLUGIN_ROOT}/lib/setup-mandatory-files.sh" "$(pwd)" <threshold> "<coverage-command>" --platform <platform> --reconfigure
 ```
 
 Where:
@@ -32,7 +32,7 @@ Where:
   - pytest → `"pytest --cov --cov-fail-under=<threshold>"`
   - vitest/pnpm → `"pnpm vitest run --coverage"`
   - jest/npm → `"npx jest --coverage"`
-  - go → `"go test -coverprofile=coverage.out ./..."`
+  - go → `"go run .metaswarm/go-coverage-gate.go"` (`go test` has no threshold flag; the script writes this gate program, which runs `go test -coverprofile=coverage.out ./...` and fails below the thresholds in `.coverage-thresholds.json`)
   - cargo → `"cargo tarpaulin --fail-under <threshold>"`
 - `<platform>` is `codex`, `claude`, `gemini`, `opencode`, or `all`. Prefer:
   - `codex` when running in Codex (`PLUGIN_ROOT` or `CODEX_HOME` is present, or the user invoked `$setup`)
@@ -40,14 +40,15 @@ Where:
   - `gemini` when running in Gemini (`extensionPath` is present, or the setup skill was invoked there)
   - `opencode` when running in OpenCode
   - `all` only when the user explicitly asks to configure every supported CLI
+- `--reconfigure`: always pass it from interactive setup, so the user's answers apply even when `.coverage-thresholds.json` already exists (a re-run, or a first run after `npx metaswarm setup` copied the template). It updates the thresholds, a `--cov-fail-under`/`--fail-under` value in `enforcement.command` and an old bare `go test` command, and keeps every other setting. Only the session hook's self-heal omits it, so a silent background run never changes the file.
 
 The script handles:
 1. **Instruction file** — `AGENTS.md` for Codex, `CLAUDE.md` for Claude, `GEMINI.md` for Gemini, `.opencode/OPENCODE.md` for OpenCode; appends metaswarm section (or writes new), skips if already present
-2. **`.coverage-thresholds.json`** — writes at project root with correct thresholds and command
+2. **`.coverage-thresholds.json`** — writes at project root with correct thresholds and command (with `--reconfigure`, updates an existing one). For Go it also writes `.metaswarm/go-coverage-gate.go`
 3. **Claude command shims** — for Claude/all only, writes `.claude/commands/start-task.md`, `prime.md`, `review-design.md`, `self-reflect.md`, `pr-shepherd.md`, `brainstorm.md`
 4. **OpenCode files** — for opencode/all only, writes the session plugin `.opencode/plugins/metaswarm-session.js` (OpenCode V2 plugin API) and the BEADS MCP server `scripts/beads-mcp-server.ts`
 
-The script outputs JSON with what was created/skipped/errored. Check that `"status": "ok"`.
+The script outputs JSON with what was created/skipped/warned/errored. Check that `"status": "ok"`, and show the user every entry in `warnings` (for example an `enforcement.command` that still embeds the old threshold).
 
 **If the script is not available or fails**, fall back to writing these files manually with the Write tool. Do NOT skip them.
 </CRITICAL-REQUIREMENTS>
@@ -216,7 +217,7 @@ Use AskUserQuestion to ask ONLY questions relevant based on detection. 3-5 quest
 
 3. **Visual review** — Ask only if a web framework was detected (Next.js, Nuxt, React, Vue, Angular, SvelteKit, Django, Flask): "Enable visual screenshot review for UI changes?" Options: "Yes" / "No"
 
-4. **CI pipeline** — Ask only if NO CI detected: "Create a GitHub Actions CI pipeline?" Options: "Yes (Recommended)" / "No"
+4. **CI pipeline** — Ask only if NO CI detected. For a stack that 5.4 renders (Node with npm, pip-based Python, Go, Rust): "Create a GitHub Actions CI pipeline?" Options: "Yes (Recommended)" / "No". For any other stack (pnpm, yarn, bun, Poetry, uv, Pipenv, Java, Ruby…), metaswarm can't write the whole workflow, so ask instead: "Add metaswarm's coverage job to a GitHub Actions workflow? I'll show you `ci-coverage-job.yml` and what to change for your toolchain." Options: "Yes" / "No"
 
 5. **Git hooks** — Ask only if NO hooks detected: "Set up git hooks for pre-push quality checks?" Options: "Yes (Recommended)" / "No"
 
@@ -239,16 +240,16 @@ fi
 if [ -z "$PLUGIN_ROOT" ] && [ -f "$(pwd)/lib/setup-mandatory-files.sh" ]; then
   PLUGIN_ROOT="$(pwd)"
 fi
-bash "${PLUGIN_ROOT}/lib/setup-mandatory-files.sh" "$(pwd)" <threshold> "<coverage-command>" --platform <platform>
+bash "${PLUGIN_ROOT}/lib/setup-mandatory-files.sh" "$(pwd)" <threshold> "<coverage-command>" --platform <platform> --reconfigure
 ```
 
 Example for Codex with Python/pytest at 100%:
 
 ```bash
-bash "${PLUGIN_ROOT}/lib/setup-mandatory-files.sh" "$(pwd)" 100 "pytest --cov --cov-fail-under=100" --platform codex
+bash "${PLUGIN_ROOT}/lib/setup-mandatory-files.sh" "$(pwd)" 100 "pytest --cov --cov-fail-under=100" --platform codex --reconfigure
 ```
 
-Check the JSON output. If `"status": "ok"`, the 3 mandatory files are done. Report to the user what was created.
+Check the JSON output. If `"status": "ok"`, the 3 mandatory files are done. Report to the user what was created, and show them every entry in `warnings`.
 
 If the script fails or is not found, write the files manually (see CRITICAL-REQUIREMENTS above for what they are).
 
@@ -279,6 +280,21 @@ Read each file from `./bin/`:
 
 Write them to `bin/` in the project. Make executable with `chmod +x`. Skip any that already exist.
 
+Do NOT copy `metaswarm-agents.sh` or `metaswarm-usage` into the project. Skills always run them from the plugin: the plugin `bin/` is on PATH in Claude Code, so resolve with `command -v metaswarm-agents.sh`, falling back to `${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/bin/metaswarm-agents.sh`.
+
+#### Models Config and Phase Agents
+
+1. Note whether `.claude/agents/` already exists (it matters for Phase 6).
+2. If `.metaswarm/models.yaml` is absent, copy `./templates/models.yaml` to `.metaswarm/models.yaml` (create `.metaswarm/` if needed).
+3. Generate the project-scoped phase agents from it:
+
+```bash
+MA="$(command -v metaswarm-agents.sh || echo "${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/bin/metaswarm-agents.sh")" # command -v metaswarm-agents.sh
+"$MA" generate
+```
+
+This writes `.claude/agents/metaswarm-<role>.md`. Exit 1 means a file was hand-edited or is user-authored; report it to the user and do not pass `--force` unless they ask. Exit 2 means `models.yaml` has a syntax error (`models.yaml:<line>: <reason>`); show it and ask the user to fix it.
+
 #### TypeScript Scripts
 
 Read each file from `./scripts/`:
@@ -286,7 +302,7 @@ Read each file from `./scripts/`:
 
 Write them to `scripts/` in the project. Skip any that already exist.
 
-**Note**: The former `beads-self-reflect.ts` script is no longer bundled — the standalone beads plugin (v0.63.3+) provides `bd compact` for semantic summarization natively.
+**Note**: The former `beads-self-reflect.ts` script is no longer bundled. `/self-reflect` captures session learnings on its own and needs no extra script.
 
 **Note**: `beads-mcp-server.ts` is the BEADS MCP server referenced by `mcp.servers.beads` in `opencode.json`. It has zero npm dependencies and runs with plain `node` (Node.js >= 22.18) — or `npx tsx` on older Node.js. It is only needed for OpenCode projects.
 
@@ -297,7 +313,7 @@ Write them to `scripts/` in the project. Skip any that already exist.
 
 | Condition | Source | Destination |
 |---|---|---|
-| User chose YES for CI | `./templates/ci.yml` | `.github/workflows/ci.yml` |
+| User chose YES for CI | `./templates/ci.yml`, rendered (see 5.4); other stacks get the `ci-coverage-job.yml` note instead | `.github/workflows/ci.yml` |
 | User chose YES for git hooks AND Husky detected or Node.js project | `./templates/pre-push` | `.husky/pre-push` (chmod +x) |
 | User chose YES for external tools | `./templates/external-tools.yaml` | `.metaswarm/external-tools.yaml` |
 | Always | `./templates/.env.example` | `.env.example` |
@@ -360,7 +376,7 @@ Command resolution reference:
 | jest | yarn | `yarn jest` | `yarn jest --coverage` |
 | mocha | any | `npx mocha` | `npx nyc mocha` |
 | pytest | -- | `pytest` | `pytest --cov --cov-fail-under={threshold}` |
-| go test | -- | `go test ./...` | `go test -coverprofile=coverage.out ./...` |
+| go test | -- | `go test ./...` | `go run .metaswarm/go-coverage-gate.go` |
 | cargo test | -- | `cargo test` | `cargo tarpaulin --fail-under {threshold}` |
 | mvn test | -- | `mvn test` | `mvn test jacoco:report` |
 | gradle test | -- | `gradle test` | `gradle test jacocoTestReport` |
@@ -386,6 +402,32 @@ Command resolution reference:
 **Node.js/TypeScript**: Install Husky if not present, run `npx husky init`, write pre-push hook.
 **Python**: Suggest `pip install pre-commit` and offer to create `.pre-commit-config.yaml`.
 **Other**: Suggest appropriate hook tools for the ecosystem.
+
+The Node pre-push hook runs `lint` and `typecheck` only when `package.json` defines them, and a failing one blocks the push.
+
+### 5.4 CI (if enabled)
+
+Run these with the `PLUGIN_ROOT` resolved in Phase 3 Step 1 (shell variables don't carry between calls, so repeat that resolution block or use the path it found).
+
+1. Render the workflow for the detected stack. `--stack` is `node` (JavaScript/TypeScript installed with npm), `python` (pip with `requirements*.txt` or a `pyproject.toml` package), `go` or `rust`. A project on pnpm, yarn or bun, or a Python project managed by Poetry, uv or Pipenv, gets the same treatment as a stack with no toolchain (exit 2 below), because the template's install steps don't fit it:
+
+   ```bash
+   bash "${PLUGIN_ROOT}/lib/render-ci.sh" --stack <stack> --out .github/workflows/ci.yml
+   ```
+
+   It keeps that stack's toolchain steps, and points `push` at the repo's default branch (from `origin/HEAD`, else `gh repo view`). Pull requests into any branch are checked. Node's lint and typecheck steps skip a script that `package.json` doesn't define, and fail the build when one fails. If it prints a warning that it guessed `main` for the branch, tell the user and re-run with `--branch <name>` if their default branch differs. Exit 1 means it couldn't render, for example because the branch name has characters a workflow file can't hold. Show the user its message, and run it again with `--branch <name>` once they give a branch to use. Exit 2 means the stack has no toolchain in the template (Java, Ruby, and so on). Don't write `ci.yml` then. Show the user the `coverage-simple` job from `./templates/ci-coverage-job.yml` to add to their workflow. Its install step already handles pnpm, yarn and bun from the lockfile; for any other stack, tell them to replace that step with their toolchain's setup and install steps (the file's header has Poetry, uv, Pipenv and Java examples). A project that is both JavaScript and Python keeps the step and adds its Python steps after it.
+
+2. Do this step and the next only if step 1 wrote `.github/workflows/ci.yml` (exit 0). With no `ci.yml`, the `CI checks` job never runs, so requiring it would block every PR. In that case, add a tip to the summary instead: once the user's own CI runs the coverage job, require that job's check (its `name:`, `Coverage Enforcement` in `ci-coverage-job.yml`).
+
+   CI only stops a merge if its check is required. Use AskUserQuestion: "Make the `CI checks` job a required check on the default branch, so a PR can't merge while coverage fails? This needs admin rights on the GitHub repo. It adds a ruleset and leaves your existing branch protection as it is. The check also applies to direct pushes to that branch, so changes land through PRs." Options: "Yes (Recommended)" / "No, I'll do it later"
+
+3. Only on Yes, run:
+
+   ```bash
+   bash "${PLUGIN_ROOT}/lib/require-ci-check.sh"
+   ```
+
+   It adds a ruleset named `metaswarm: required CI check` and does nothing if that ruleset already exists. Once it succeeds, the default branch takes no direct pushes, so tell the user to land the setup files through a PR: commit them on a branch and open one, which is also the first run of the new check. If it exits 1 (no `gh`, not logged in, or no admin rights), show the user the manual steps it printed. A private repo on GitHub Free can't use rulesets or branch protection at all; say so if GitHub's error mentions the plan. On No, put those steps in the summary tips: Settings → Rules → Rulesets, target the default branch, and require the status check `CI checks`.
 
 ---
 
@@ -419,11 +461,14 @@ Other files written:
 You're all set! Run the platform's start command to begin working.
 ```
 
+**Restart note**: if `.claude/agents/` did not exist before Phase 3 and `generate` created it, tell the user to restart the session (Claude Code only watches agent directories that existed at session start). Until then the plugin's default phase models apply.
+
 **Command naming**: When recommending metaswarm skills to the user, use `$name` forms (`$start`, `$setup`, `$status`, `$pr-shepherd`) unless the active platform has already created and selected its own command shims.
 
 Offer 1-2 relevant tips based on configuration:
 - If external tools enabled: "Use `$external-tools` to check tool status."
-- If no CI set up: "Consider adding CI later -- metaswarm includes a template at `./templates/ci.yml`."
+- If no CI set up: "Consider adding CI later: re-run `/setup`, or render the template yourself with `lib/render-ci.sh --stack <stack>` from the metaswarm plugin."
+- If CI was written but its check isn't required: "Require the `CI checks` status check on your default branch (Settings → Rules → Rulesets) so a failing PR can't merge."
 - If visual review enabled: "The visual review skill will screenshot your app during development."
 
 ---

@@ -1,3 +1,9 @@
+---
+name: metrics-agent
+description: "Collects, aggregates and reports on agent swarm performance. Use for scheduled or manual metrics reports."
+model: inherit
+---
+
 # Metrics Agent
 
 **Type**: `metrics-agent`
@@ -41,15 +47,16 @@ Triggered when:
 
 **BEFORE any other work**, prime your context:
 
-```bash
-bd prime --work-type research --keywords "metrics" "reporting"
+```text
+`/prime` (metaswarm knowledge priming) for research work on "metrics" "reporting"
 ```
 
 ### Step 1: Collect Agent Metrics
 
 ```bash
-# Get all completed tasks in time period
-bd list --status=closed --since="7 days ago" --json > /tmp/completed-tasks.json
+# Get all completed tasks in time period (closed in the last 7 days)
+SINCE=$(date -v-7d +%F 2>/dev/null || date -d "7 days ago" +%F)  # YYYY-MM-DD (macOS || GNU date)
+bd list --status=closed --closed-after "$SINCE" --json > /tmp/completed-tasks.json
 
 # Get active and blocked tasks
 bd list --status=in_progress --json > /tmp/active-tasks.json
@@ -272,8 +279,8 @@ if (trends.blockerTrend === "increasing") {
 
 | Agent             | Tasks | Completed | Success Rate | Avg Duration |
 | ----------------- | ----- | --------- | ------------ | ------------ |
-| coder-agent       | 15    | 14        | 93%          | 45 min       |
-| code-review-agent | 20    | 20        | 100%         | 15 min       |
+| coder       | 15    | 14        | 93%          | 45 min       |
+| adversarial-reviewer | 20    | 20        | 100%         | 15 min       |
 | ...               |       |           |              |              |
 
 ### Throughput
@@ -345,7 +352,7 @@ metrics/
 │   ├── 2026-W02.json
 │   └── ...
 └── agents/
-    ├── coder-agent.jsonl
+    ├── coder.jsonl
     └── ...
 ```
 

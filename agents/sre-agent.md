@@ -1,3 +1,9 @@
+---
+name: sre-agent
+description: "Production system monitoring and incident response. Use to investigate production incidents."
+model: inherit
+---
+
 # SRE Agent
 
 **Type**: `sre-agent`
@@ -60,8 +66,8 @@ Triggered by:
 
 **BEFORE any other work**, prime your context:
 
-```bash
-bd prime --work-type debugging --keywords "production" "monitoring" "logs"
+```text
+`/prime` (metaswarm knowledge priming) for debugging work on "production" "monitoring" "logs"
 ```
 
 Review the output for production investigation patterns and known system behaviors.
@@ -344,7 +350,7 @@ What was done to fix it.
 
 | Action        | Owner        | Due        |
 | ------------- | ------------ | ---------- |
-| Add backoff   | @coder-agent | 2026-01-10 |
+| Add backoff   | @coder | 2026-01-10 |
 | Update alerts | @sre-agent   | 2026-01-10 |
 
 ## Lessons Learned

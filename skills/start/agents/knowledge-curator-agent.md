@@ -1,3 +1,9 @@
+---
+name: knowledge-curator-agent
+description: "Knowledge extraction and curation into the BEADS knowledge base. Use after a PR merge or to reflect on completed work."
+model: sonnet
+---
+
 # Knowledge Curator Agent
 
 **Type**: `learning-curator-agent`
@@ -40,8 +46,8 @@ Triggered when:
 
 **BEFORE any other work**, prime your context:
 
-```bash
-bd prime --work-type research --keywords "knowledge" "learning" "coderabbit"
+```text
+`/prime` (metaswarm knowledge priming) for research work on "knowledge" "learning" "coderabbit"
 ```
 
 Review the output for patterns about what makes good knowledge base entries.

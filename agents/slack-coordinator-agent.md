@@ -1,3 +1,9 @@
+---
+name: slack-coordinator-agent
+description: "Human-agent communication bridge via Slack. Use to route notifications and human responses."
+model: inherit
+---
+
 # Slack Coordinator Agent
 
 **Type**: `swarm-coordinator` (Slack interface specialization)
@@ -68,8 +74,8 @@ Triggered when:
 
 **BEFORE processing commands**, prime your context:
 
-```bash
-bd prime --work-type research --keywords "slack" "notification" "communication"
+```text
+`/prime` (metaswarm knowledge priming) for research work on "slack" "notification" "communication"
 ```
 
 Review the output for patterns about agent-human communication.
@@ -178,7 +184,7 @@ await slack.notifyTaskUpdate({
   taskId: "bd-a1b2",
   title: "Implement feature X",
   status: "closed",
-  agentType: "coder-agent",
+  agentType: "coder",
 });
 
 // Send alert

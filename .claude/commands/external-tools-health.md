@@ -1,11 +1,44 @@
+---
+description: Check the status of external AI tools (Codex CLI, Gemini CLI) and their configuration
+---
+
 # External Tools Health Check
 
-Run health checks on all configured external AI tools and report their status.
+Check the status of external AI tools (Codex CLI, Gemini CLI) and their configuration.
+
+## Usage
+
+```text
+/external-tools-health
+```
 
 ## Steps
 
-1. Run `skills/external-tools/adapters/codex.sh health` and capture JSON output
-2. Run `skills/external-tools/adapters/gemini.sh health` and capture JSON output
-3. Report status of each tool (ready/unavailable) with version and auth info
-4. If any tools are unavailable, suggest setup steps from `templates/external-tools-setup.md`
-5. Check for `.metaswarm/external-tools.yaml` config file — report if present and summarize settings
+1. **Locate the adapters.** The plugin's `bin/` is on PATH; `PLUGIN_ROOT`/`CLAUDE_PLUGIN_ROOT` often isn't set:
+   ```bash
+   MS_BIN="$(dirname "$(command -v metaswarm-agents.sh 2>/dev/null || echo "${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-.}}/bin/metaswarm-agents.sh")")"
+   AD="$MS_BIN/../skills/external-tools/adapters"
+   ```
+
+2. **Run each adapter's health check.** Each prints one JSON object with `"tool"`, `"status"` (`ready` or `unavailable`), `"version"` (`not_installed` if the CLI is missing), `"auth_valid"` and `"model"`:
+   ```bash
+   bash "$AD/codex.sh" health || echo '{"tool":"codex","status":"error","version":"unknown","auth_valid":"unknown","model":"unknown"}'
+   bash "$AD/gemini.sh" health || echo '{"tool":"gemini","status":"error","version":"unknown","auth_valid":"unknown","model":"unknown"}'
+   ```
+   A `"status":"error"` row means the adapter itself failed (for example, Gemini can exit non-zero while resolving its model). Report it as an adapter error and show the adapter's stderr. Don't infer that the CLI is missing or logged out.
+   To see the model for a specific role, add `--role <role>`. Models come from `.metaswarm/models.yaml` (`roles.<role>.codex|gemini`).
+
+3. **Check configuration.** Read `.metaswarm/external-tools.yaml` if it exists, and report which adapters are enabled or disabled. If `external-tools.yaml` still has an `adapters.<tool>.model`, report that it is no longer read (removed in 0.14.0) and that the model belongs in `.metaswarm/models.yaml` `roles.<role>.<tool>`.
+
+4. **Report status.** Show a summary table with one row per tool: `status`, `version`, `auth_valid`, `model`, and whether it's enabled in the config. Give each tool that isn't `ready` the remedy that matches its state:
+   - For a `"status":"error"` row (the adapter itself failed, e.g. model resolution): show the adapter's stderr and fix that cause. Don't suggest install or login.
+   - `version` is `not_installed`: install the CLI.
+   - `auth_valid` is `false`: log in (`codex login`, or set `OPENAI_API_KEY` / the Gemini credentials).
+   - Disabled in `.metaswarm/external-tools.yaml`: enable it there if it's wanted.
+
+## Related
+
+- `skills/external-tools/SKILL.md` — the external tools delegation skill
+- `.metaswarm/external-tools.yaml` — configuration file
+- `.metaswarm/models.yaml` — per-role models (`roles.<role>.codex|gemini`)
+- `bin/external-tools-verify.sh`: the metaswarm repo's own adapter self-test (for developing metaswarm; not a health check)

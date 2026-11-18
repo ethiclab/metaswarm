@@ -5,9 +5,9 @@
 # Requires:  gemini CLI (https://github.com/google-gemini/gemini-cli)
 #
 # Usage:
-#   gemini.sh health
-#   gemini.sh implement --worktree <path> --prompt-file <path> [--context-dir <dir>] [--timeout <secs>] [--attempt <n>]
-#   gemini.sh review   --worktree <path> --rubric-file <path> --spec-file <path> [--timeout <secs>] [--attempt <n>]
+#   gemini.sh health [--role <role>]
+#   gemini.sh implement --worktree <path> --prompt-file <path> [--context-dir <dir>] [--timeout <secs>] [--attempt <n>] [--role <role>]
+#   gemini.sh review   --worktree <path> --rubric-file <path> --spec-file <path> [--timeout <secs>] [--attempt <n>] [--role <role>]
 
 set -euo pipefail
 
@@ -27,6 +27,9 @@ DEFAULT_MODEL="pro"
 # health — Preflight check
 # =========================================================================
 cmd_health() {
+  parse_args "$@"
+  local model
+  model="$(resolve_model "$TOOL_NAME" "$XT_ROLE")" || return 1
   local status="ready"
   local version="unknown"
   local auth_valid=false
@@ -34,7 +37,7 @@ cmd_health() {
   # Check if gemini binary exists
   if ! command -v "$TOOL_CMD" >/dev/null 2>&1; then
     printf '{"tool":"%s","status":"unavailable","version":"not_installed","auth_valid":false,"model":"%s"}\n' \
-      "$TOOL_NAME" "$DEFAULT_MODEL"
+      "$TOOL_NAME" "$model"
     return 0
   fi
 
@@ -71,11 +74,11 @@ cmd_health() {
       --arg status "$status" \
       --arg version "$version" \
       --argjson auth_valid "$auth_valid" \
-      --arg model "$DEFAULT_MODEL" \
+      --arg model "$model" \
       '{tool: $tool, status: $status, version: $version, auth_valid: $auth_valid, model: $model}'
   else
     printf '{"tool":"%s","status":"%s","version":"%s","auth_valid":%s,"model":"%s"}\n' \
-      "$TOOL_NAME" "$status" "$version" "$auth_valid" "$DEFAULT_MODEL"
+      "$TOOL_NAME" "$status" "$version" "$auth_valid" "$model"
   fi
 }
 
@@ -84,6 +87,8 @@ cmd_health() {
 # =========================================================================
 cmd_implement() {
   parse_args "$@"
+  local model
+  model="$(resolve_model "$TOOL_NAME" "$XT_ROLE")" || return 1
 
   # Validate required arguments
   if [[ -z "$XT_WORKTREE" ]]; then
@@ -128,7 +133,7 @@ cmd_implement() {
     "$TOOL_CMD" \
       --yolo \
       --output-format json \
-      --model "$DEFAULT_MODEL" \
+      --model "$model" \
       --include-directories "$XT_WORKTREE" \
       "$prompt_content" \
     || exit_code=$?
@@ -156,7 +161,7 @@ cmd_implement() {
     result="$(emit_error \
       "$TOOL_NAME" \
       "implement" \
-      "$DEFAULT_MODEL" \
+      "$model" \
       "$XT_ATTEMPT" \
       "$exit_code" \
       "$stderr_file" \
@@ -208,7 +213,7 @@ cmd_implement() {
   result="$(emit_json \
     "$TOOL_NAME" \
     "implement" \
-    "$DEFAULT_MODEL" \
+    "$model" \
     "$XT_ATTEMPT" \
     "$exit_code" \
     "$branch" \
@@ -231,6 +236,8 @@ cmd_implement() {
 # =========================================================================
 cmd_review() {
   parse_args "$@"
+  local model
+  model="$(resolve_model "$TOOL_NAME" "$XT_ROLE")" || return 1
 
   # Validate required arguments
   if [[ -z "$XT_WORKTREE" ]]; then
@@ -296,13 +303,21 @@ ${diff_content}
 
 ## Instructions
 1. Evaluate the diff against the specification and rubric.
-2. For each issue found, provide:
-   - file:line citation
-   - Classification: BLOCKING or WARNING
-   - Description of the issue
+2. For each issue found, provide these fields:
+   - title: <short label, ≤ ~80 chars>
+   - description: <1-3 sentences: what is wrong and why it matters>
+   - severity: critical | major | minor | nit
+   - protects: the credible user scenario, explicit requirement or DoD item the issue protects (required for critical/major)
+   - evidence: file:line citation, or expected-vs-found
+   - blocker: yes | no (yes only if severity is critical or major AND protects is non-empty)
+   - theme: <short label> (every finding)
+   - needs_user: yes | no (blockers only: yes only if just the user can answer it)
+   - origin: implementation | requirement | assumption (blockers only)
+   - assumption: <ledger id such as A3, or a quoted decision> (when origin is assumption)
+   A critical or major issue without protects is advisory: report it with blocker: no.
 3. Provide a final verdict: PASS or FAIL
-   - FAIL if any BLOCKING issues exist
-   - PASS if only WARNING issues or no issues
+   - FAIL only if at least one finding has blocker: yes
+   - Otherwise PASS, including when there are minor, nit or advisory issues
 
 Respond in JSON format:
 {
@@ -311,8 +326,16 @@ Respond in JSON format:
     {
       "file": "path/to/file",
       "line": 42,
-      "classification": "BLOCKING|WARNING",
-      "description": "Description of the issue"
+      "title": "<short label, ≤ ~80 chars>",
+      "description": "<1-3 sentences: what is wrong and why it matters>",
+      "severity": "critical|major|minor|nit",
+      "protects": "credible user scenario, explicit requirement or DoD item (required for critical/major)",
+      "evidence": "file:line or expected-vs-found",
+      "blocker": "yes|no",
+      "theme": "<short label>",
+      "needs_user": "yes|no",
+      "origin": "implementation|requirement|assumption",
+      "assumption": "<ledger id such as A3, when origin is assumption>"
     }
   ],
   "summary": "Brief overall assessment"
@@ -335,7 +358,7 @@ PROMPT_EOF
     "$TOOL_CMD" \
       --sandbox \
       --output-format json \
-      --model "$DEFAULT_MODEL" \
+      --model "$model" \
       "$review_prompt" \
     || exit_code=$?
 
@@ -359,7 +382,7 @@ PROMPT_EOF
     result="$(emit_error \
       "$TOOL_NAME" \
       "review" \
-      "$DEFAULT_MODEL" \
+      "$model" \
       "$XT_ATTEMPT" \
       "$exit_code" \
       "$stderr_file" \
@@ -389,7 +412,7 @@ PROMPT_EOF
   result="$(emit_json \
     "$TOOL_NAME" \
     "review" \
-    "$DEFAULT_MODEL" \
+    "$model" \
     "$XT_ATTEMPT" \
     "$exit_code" \
     "$branch" \
@@ -415,7 +438,7 @@ shift || true
 
 case "$command" in
   health)
-    cmd_health
+    cmd_health "$@"
     ;;
   implement)
     cmd_implement "$@"
@@ -436,8 +459,12 @@ Options (implement):
   --worktree <path>       Path to the git worktree (required)
   --prompt-file <path>    Path to the prompt file (required)
   --context-dir <dir>     Restrict changes to this directory
+  --role <role>           metaswarm role; model from .metaswarm/models.yaml
   --timeout <seconds>     Command timeout (default: 300)
   --attempt <n>           Attempt number (default: 1)
+
+Options (health):
+  --role <role>           metaswarm role; model from .metaswarm/models.yaml
 
 Options (review):
   --worktree <path>       Path to the git worktree (required)
@@ -445,6 +472,7 @@ Options (review):
   --spec-file <path>      Path to the task specification (required)
   --timeout <seconds>     Command timeout (default: 300)
   --attempt <n>           Attempt number (default: 1)
+  --role <role>           metaswarm role; model from .metaswarm/models.yaml
 USAGE
     exit 1
     ;;

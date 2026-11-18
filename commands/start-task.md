@@ -1,3 +1,7 @@
+---
+description: Begin tracked work on a task with complexity assessment
+---
+
 # Start Task
 
 Determine task complexity and use appropriate workflow for efficient development.
@@ -16,14 +20,15 @@ Before starting any new task:
 
 **Context Recovery Check**:
 
+- [ ] Check for a non-closed file in `.beads/context/review-history/` (even when there is no active plan): it means an interrupted review gate. If its `status` is `clarify-pending`, re-ask the pending questions instead of iterating; if the helper's result for its last round is an escalation, re-send the escalation report and wait for the user's choice; otherwise resume it at its next round
 - [ ] Check if `.beads/plans/active-plan.md` exists with `status: in-progress`
 - [ ] If YES: An interrupted execution exists. Ask user: "There's an active plan from a previous session. Resume it or start fresh?"
-  - Resume → run `bd prime --work-type recovery` and pick up where execution stopped
+  - Resume → if bd is installed, `bd prime` (bd context); then read `.beads/plans/active-plan.md` and `.beads/context/*.md`; then `/prime` for knowledge; then pick up where execution stopped
   - Start fresh → mark the old plan as `status: abandoned` and proceed normally
 
 **Knowledge Priming (CRITICAL)**:
 
-- [ ] Run BEADS prime: `bd prime --keywords "<task-keywords>" --work-type planning`
+- [ ] Run `/prime` (metaswarm knowledge priming) for planning work on "<task-keywords>"
 - [ ] Review MUST FOLLOW rules and GOTCHAS before proceeding
 - [ ] Note any relevant patterns or decisions that constrain the approach
 
@@ -113,13 +118,13 @@ If the issue lacks DoD items or clear scope, ask the user to clarify before proc
 
 **If the problem is unclear:**
 
-- Route to `superpowers:brainstorming` first to refine the idea into a design
-- **MANDATORY HANDOFF**: After brainstorming commits a design document, you MUST:
+- Route to `superpowers:brainstorming` first to refine the idea into a design, and load `metaswarm:brainstorming-extension` at the start of brainstorming (not only after the commit) for its assumption ledger and Common misreadings checklist, which apply to every brainstorming session regardless of size
+- **Design Review Gate (project-sized designs only)**: When brainstorming writes and commits a project-sized design doc (see the metaswarm plugin's `guides/workflow-enforcement.md`), you MUST:
   1. STOP — do NOT proceed directly to `writing-plans` or implementation
   2. Run the Design Review Gate (`/review-design` or invoke the `design-review-gate` skill)
-  3. Wait for all 5 review agents (PM, Architect, Designer, Security, CTO) to APPROVE
+  3. Wait for all 6 review agents (PM, Architect, Designer, Security, UX Reviewer, CTO) to APPROVE
   4. Only after ALL APPROVED, proceed to planning
-- This handoff is required even if the brainstorming skill instructs you to invoke `writing-plans` next. The design review gate catches issues before expensive implementation begins.
+- For a project-sized design doc, the gate is required even if the brainstorming skill instructs you to invoke `writing-plans` next. Quick tasks, chat-only designs and short design docs for small changes skip it. The design review gate catches issues before expensive implementation begins.
 - After design review approval, create a GitHub Issue from the refined design
 - The issue should contain: scope, DoD items, file scope, human checkpoints
 
@@ -168,20 +173,14 @@ See the `orchestrated-execution` skill for the full pattern. Key principles:
 - **Trust nothing, verify everything**: Run quality gates independently, never trust subagent self-reports
 - **Adversarial review**: Fresh reviewer checks each DoD item with file:line evidence
 - **Human checkpoints**: Pause at planned review points before continuing
-- **Recovery**: Max 3 retries per work unit, then escalate with failure history
+- **Recovery**: VALIDATE failures get up to 3 attempts per work unit, then escalate with failure history. Review rounds follow severity-gated iteration (cap 10 rounds; see the metaswarm plugin's `guides/delivery-scope.md`)
 - **No shortcuts**: NEVER use `--no-verify` on commits, NEVER skip coverage gates, NEVER self-certify
 
 #### Multi-Agent Orchestration (for large features)
 
 For complex tasks requiring multiple phases, consider spawning sub-agents:
 
-**Model specialization guidance:**
-
-| Model  | Best For                                                  |
-| ------ | --------------------------------------------------------- |
-| Opus   | Orchestration, architecture, security analysis, synthesis |
-| Sonnet | Code analysis, implementation, code review, feature work  |
-| Haiku  | Metrics collection, simple analysis, data processing      |
+**Model selection:** don't pass `model:` per spawn. Spawn the phase's role type (see the Role type resolution rule and roster in the metaswarm plugin's `guides/agent-coordination.md`): reviewers default to Opus, coders and researchers to Sonnet. Per-project overrides live in `.metaswarm/models.yaml`.
 
 **Pattern**: Spawn parallel sub-agents for independent work (e.g., code review + security audit), sequential agents for dependent phases (research -> planning -> implementation).
 

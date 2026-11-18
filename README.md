@@ -1,19 +1,19 @@
 # metaswarm
 
-A self-improving multi-agent orchestration framework for [Claude Code](https://docs.anthropic.com/en/docs/claude-code), Gemini CLI, Codex CLI, and OpenCode. Coordinate 18 specialized AI agents and 13 orchestration skills through a complete software development lifecycle, from issue to merged PR, with recursive orchestration, parallel review gates, and a git-native knowledge base.
+A self-improving multi-agent orchestration framework for [Claude Code](https://docs.anthropic.com/en/docs/claude-code), Gemini CLI, and Codex CLI. Coordinate 23 AI agents and 14 orchestration skills through a complete software development lifecycle, from issue to merged PR, with recursive orchestration, parallel review gates, and a git-native knowledge base.
 
 ## What Is This?
 
 metaswarm is an extraction of a production-tested agentic orchestration system. It has been proven in the field writing production-level code with 100% test coverage, mandatory TDD, multi-reviewed spec-driven development, and SDLC best practices across hundreds of PRs. It provides:
 
-- **18 specialized agent personas** (Researcher, Architect, Coder, Security Auditor, PR Shepherd, etc.)
-- **A structured 9-phase workflow**: Research → Plan → Design Review Gate → Work Unit Decomposition → Orchestrated Execution → Final Review → PR Creation → PR Shepherd → Closure & Learning
+- **23 agents: phase agents and specialized personas** (Researcher, Architect, Coder, Security Auditor, PR Shepherd, etc.)
+- **A structured 9-phase workflow**: Research → Plan (with its Plan Review Gate) → Design Review Gate → Work Unit Decomposition → Orchestrated Execution → Final Review → PR Creation → PR Shepherd → Closure & Learning
 - **4-Phase Orchestrated Execution Loop**: Each work unit runs through IMPLEMENT → VALIDATE → ADVERSARIAL REVIEW → COMMIT. The orchestrator validates independently (never trusts subagent self-reports), and adversarial reviewers check DoD compliance with file:line evidence
-- **Parallel Design Review Gate**: 5 specialist agents (PM, Architect, Designer, Security, CTO) review in parallel with a 3-iteration cap before human escalation
+- **Parallel Design Review Gate**: 6 specialist agents (PM, Architect, Designer, Security, UX Reviewer, CTO) review in parallel; severity-gated iteration (only `blocker: yes` findings re-run the gate, cap 10 rounds) before human escalation
 - **Recursive orchestration**: Swarm Coordinators spawn Issue Orchestrators, which spawn sub-orchestrators for complex epics (swarm of swarms)
-- **Git-native task tracking**: Uses [BEADS](https://github.com/steveyegge/beads) (`bd` CLI) for issue/task management, dependencies, and knowledge priming
+- **Git-native task tracking**: Uses [BEADS](https://github.com/steveyegge/beads) (`bd` CLI) for issue/task management and dependencies; metaswarm's own `/prime` command handles knowledge priming
 - **Knowledge base**: JSONL-based fact store for patterns, gotchas, decisions, and anti-patterns — agents prime from this before every task
-- **Quality rubrics**: Standardized review criteria for code, architecture, security, testing, planning, and adversarial spec compliance
+- **Quality rubrics**: Standardized review criteria for code, architecture, security, testing, planning, UX, release engineering, and adversarial spec compliance
 - **External AI tool delegation**: Optionally delegate implementation and review tasks to OpenAI Codex CLI and Google Gemini CLI for cost savings and cross-model adversarial review
 - **Visual review**: Playwright-based screenshot capture for reviewing web UIs, presentations, and rendered pages
 - **PR lifecycle automation**: Autonomous CI monitoring, review comment handling, and thread resolution
@@ -40,7 +40,7 @@ Your prompt (spec with DoD items) or GitHub Issue
 └─────────────────────────────────┘
         │
         ▼
-  Research → Plan → Design Review Gate (5 parallel reviewers)
+  Research → Plan → Plan Review Gate (3 reviewers) → Design Review Gate (6 reviewers, on the plan)
         │
         ▼
   Work Unit Decomposition (DoD items, file scopes, dependency graph)
@@ -75,9 +75,9 @@ metaswarm/
 │   ├── hooks.json            # SessionStart + PreCompact hook definitions
 │   └── session-start.sh      # Context priming (platform-aware)
 ├── skills/                   # Orchestration skills (Agent Skills standard — portable)
-│   ├── start/                # Main entry point — workflow guide + 18 agent personas
+│   ├── start/                # Main entry point — workflow guide + 23 agent personas
 │   ├── orchestrated-execution/ # 4-phase execution loop (IMPLEMENT→VALIDATE→REVIEW→COMMIT)
-│   ├── design-review-gate/   # Parallel 5-agent review
+│   ├── design-review-gate/   # Parallel 6-agent review
 │   ├── plan-review-gate/     # 3-reviewer adversarial plan review
 │   ├── setup/                # Interactive project setup
 │   ├── migrate/              # Migration from npm to plugin installation
@@ -86,13 +86,14 @@ metaswarm/
 │   ├── handling-pr-comments/ # Review comment workflow
 │   ├── brainstorming-extension/
 │   ├── create-issue/
+│   ├── handoff/              # Session handoff doc for a fresh agent
 │   ├── external-tools/       # Cross-model AI delegation (Codex, Gemini CLI)
 │   └── visual-review/        # Playwright-based screenshot review
 ├── commands/                  # Slash commands
-│   ├── *.md                  # Claude Code commands (15 files)
-│   └── metaswarm/*.toml      # Gemini CLI commands (12 files)
-├── agents/                    # 18 agent persona definitions
-├── rubrics/                   # Quality review standards
+│   ├── *.md                  # Claude Code commands (16 files)
+│   └── metaswarm/*.toml      # Gemini CLI commands (13 files)
+├── agents/                    # 23 agent definitions
+├── rubrics/                   # 10 quality review rubrics
 ├── guides/                    # Development patterns
 ├── knowledge/                 # Knowledge base schema + templates
 ├── templates/                 # Setup templates (CLAUDE.md, AGENTS.md, GEMINI.md + append variants)
@@ -155,6 +156,21 @@ and a delivery log UI.
 
 See [INSTALL.md](INSTALL.md) for prerequisites, platform-specific details, and migration from older versions.
 
+## Per-phase models
+
+Each phase runs as its own agent type with a default model in its frontmatter, so reviewers get a strong model and mechanical work gets a cheaper one.
+
+| Role | Default model |
+|---|---|
+| `design-reviewer`, `plan-reviewer`, `adversarial-reviewer`, `planner` | opus |
+| `researcher`, `coder`, `pr-shepherd-agent`, `knowledge-curator-agent` | sonnet |
+| `issue-orchestrator`, `swarm-coordinator-agent` | inherit (your session model) |
+
+- **Override:** edit `.metaswarm/models.yaml`, then run `/update` to regenerate the `.claude/agents/metaswarm-<role>.md` files. Restart Claude Code after `.claude/agents/` is first created. `issue-orchestrator` and `swarm-coordinator-agent` are plugin-only (they inherit the session model) and are not configurable in `models.yaml`.
+- **Requires** Claude Code v2.1.251 or later.
+- **See what ran on which model:** `metaswarm-usage` (in the plugin's `bin/`, on PATH inside Claude Code — type `! metaswarm-usage` at the prompt) reports subagent cost and review-gate rounds from your Claude Code transcripts (`--json` for machine output).
+- Other hosts (Codex, Gemini, OpenCode, Cursor): see `skills/start/references/platform-adaptation.md`.
+
 ## Self-Learning System
 
 metaswarm doesn't just execute — it learns from every session and gets smarter over time.
@@ -179,12 +195,13 @@ These signals feed back into the knowledge base and can generate proposals for n
 
 ### Selective Knowledge Priming
 
-The knowledge base grows continuously, but agents don't load all of it. The `bd prime` command uses **selective retrieval** — filtering by affected files, keywords, and work type to load only the relevant subset:
+The knowledge base grows continuously, but agents don't load all of it. metaswarm's `/prime` command filters the knowledge base with `jq` (keyword over each fact and its tags, file over its affected files, work type over its fact type) so only the relevant subset is loaded:
 
-```bash
-# Only loads knowledge relevant to auth files and implementation work
-bd prime --files "src/api/auth/**" --keywords "authentication" --work-type implementation
+```text
+/prime authentication src/api/auth/ implementation
 ```
+
+See `commands/prime.md` for the exact filters.
 
 This means the knowledge base can grow to hundreds or thousands of entries without consuming context window. Agents get precisely the facts they need — the 5 critical gotchas for the files they're about to touch, not the entire institutional memory.
 
@@ -198,7 +215,7 @@ This means the knowledge base can grow to hundreds or thousands of entries witho
 6. **BEADS as Source of Truth** — All task state lives in BEADS; agents coordinate via database, not messages
 7. **Test-First Always** — TDD is mandatory, not optional. Coverage thresholds are enforced as a blocking gate before PR creation via `.coverage-thresholds.json`
 8. **Git-Native Everything** — Issues, knowledge, specs all in version control
-9. **Human-in-the-Loop** — Proactive checkpoints at planned review points, plus automatic escalation after 3 failed iterations or ambiguous decisions
+9. **Human-in-the-Loop** — Proactive checkpoints at planned review points, plus automatic escalation or a Clarify stop when the severity rule says so (a recurring or disputed blocker, the 10-round cap, or a signal that the user is needed) or on ambiguous decisions
 
 ## Supported Platforms
 
@@ -212,8 +229,8 @@ This means the knowledge base can grow to hundreds or thousands of entries witho
 ## Requirements
 
 - One of: Claude Code, Gemini CLI, Codex CLI, or OpenCode
-- Node.js 18+ (for automation scripts)
-- [BEADS](https://github.com/steveyegge/beads) CLI (`bd`) v0.40+ — for task tracking (recommended)
+- Node.js 18+ (for automation scripts; contributing to metaswarm itself needs Node.js 22.8+ for the coverage gate)
+- [BEADS](https://github.com/steveyegge/beads) CLI (`bd`) — for task tracking (recommended). Minimum versions: bd ≥ 1.0.4 (tested with 1.3.4); the beads plugin version matching your bd; Dolt ≥ 2.4.0 only for server mode (`bd init --server`)
 - GitHub CLI (`gh`) — for PR automation (recommended)
 - Playwright — for visual review skill (optional, `npx playwright install chromium`)
 
@@ -225,7 +242,7 @@ MIT
 
 metaswarm stands on the shoulders of two key projects:
 
-- **[BEADS](https://github.com/steveyegge/beads)** by [Steve Yegge](https://github.com/steveyegge) — The git-native, AI-first issue tracking system that serves as the coordination backbone for all agent task management, dependency tracking, and knowledge priming in metaswarm. BEADS made it possible to treat issue tracking as a first-class part of the codebase rather than an external service.
+- **[BEADS](https://github.com/steveyegge/beads)** by [Steve Yegge](https://github.com/steveyegge) — The git-native, AI-first issue tracking system that serves as the coordination backbone for all agent task management and dependency tracking in metaswarm. BEADS made it possible to treat issue tracking as a first-class part of the codebase rather than an external service.
 
 - **[Superpowers](https://github.com/obra/superpowers)** by [Jesse Vincent](https://github.com/obra) and contributors — The agentic skills framework and software development methodology that provides foundational skills metaswarm builds on, including brainstorming, test-driven development, systematic debugging, and plan writing. Superpowers demonstrated that disciplined agent workflows aren't overhead — they're what make autonomous development reliable.
 

@@ -1,0 +1,190 @@
+#!/usr/bin/env bash
+# tests/commands/test-command-sources.sh
+# Content checks for command sources (#64): legacy redirect shims and /external-tools-health.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+PASS=0
+FAIL=0
+# bash 3.2 exits with the EXIT trap's status (0) when `set -u` aborts the script,
+# so a crash would look like a pass. DONE is set only after the summary runs.
+DONE=0
+trap '[ "$DONE" = 1 ] || { echo "ABORTED before summary" >&2; exit 1; }' EXIT
+
+pass() { PASS=$((PASS + 1)); echo "  PASS: $1"; }
+fail() { FAIL=$((FAIL + 1)); echo "  FAIL: $1"; }
+has() { grep -qF -e "$2" "$REPO_ROOT/$1"; }
+
+# Legacy commands are short redirect shims (items 2-5 of #64 lived in their old bodies).
+SHIM_MAX_LINES=30
+check_shim() { # <file> <target command>
+  local f="$1" target="$2" n
+  echo "Legacy shim: $f -> $target"
+  n=$(wc -l <"$REPO_ROOT/$f" | tr -d ' ')
+  [ "$n" -le "$SHIM_MAX_LINES" ] && pass "$f is a short shim ($n lines)" || fail "$f is a short shim ($n lines > $SHIM_MAX_LINES)"
+  has "$f" "deprecated" && pass "$f says it is deprecated" || fail "$f says it is deprecated"
+  has "$f" "$target" && pass "$f redirects to $target" || fail "$f redirects to $target"
+  if grep -qE -e 'npx metaswarm(@latest)? (install|changelog)' "$REPO_ROOT/$f"; then
+    fail "$f has no nonexistent CLI commands"
+  else
+    pass "$f has no nonexistent CLI commands"
+  fi
+}
+check_shim commands/metaswarm-setup.md /setup
+check_shim commands/metaswarm-update-version.md /update
+
+# /external-tools-health runs each adapter's health command and reports its fields (item 6).
+F=commands/external-tools-health.md
+echo "External tools health: $F"
+for adapter in codex gemini; do
+  has "$F" "$adapter.sh\" health" && pass "$F runs $adapter.sh health" || fail "$F runs $adapter.sh health"
+done
+for field in '"status"' '"auth_valid"' '"version"' '"model"'; do
+  has "$F" "$field" && pass "$F reports $field" || fail "$F reports $field"
+done
+for adapter in codex gemini; do
+  line=$(grep -F -e "$adapter.sh\" health ||" "$REPO_ROOT/$F" || true)
+  ok=1
+  for k in '"status":"error"' '"version":"unknown"' '"auth_valid":"unknown"' '"model":"unknown"'; do
+    printf '%s' "$line" | grep -qF -e "$k" || ok=0
+  done
+  [ "$ok" = 1 ] && pass "$F $adapter fallback keeps every report field" || fail "$F $adapter fallback keeps every report field"
+done
+has "$F" "For a \`\"status\":\"error\"\` row" && pass "$F step 4 gives adapter errors their own remedy" || fail "$F step 4 gives adapter errors their own remedy"
+has "$F" "adapter error" && pass "$F reports an adapter error as such" || fail "$F reports an adapter error as such"
+if has "$F" "bash bin/external-tools-verify.sh"; then
+  fail "$F does not run the repo self-test as a health check"
+else
+  pass "$F does not run the repo self-test as a health check"
+fi
+
+# docs/coverage-enforcement.md manual steps must leave a working gate (PR #82 review).
+CE="$(cat "$REPO_ROOT/docs/coverage-enforcement.md")"
+echo "Coverage enforcement doc"
+# The CI template is rendered per stack (#83); the doc must still point other stacks at the job template.
+for s in 'npm install --save-dev husky' 'templates/coverage-thresholds.json' 'set `enforcement.command`' 'lib/render-ci.sh' 'templates/ci-coverage-job.yml'; do
+  grep -qF -e "$s" <<<"$CE" && pass "coverage-enforcement.md mentions: $s" || fail "coverage-enforcement.md mentions: $s"
+done
+
+# Every command has frontmatter with a description, so plugin installs list it for the model
+# (`claude plugin validate` flags commands without one). The description must be a valid YAML
+# scalar: a plain value can't contain ": " or " #" or start with an indicator character, so
+# such values must be quoted. Ruby's Psych parses the block too when it's available.
+echo "Command frontmatter"
+FM_CHECK='
+  const fs = require("fs");
+  const text = fs.readFileSync(process.argv[1], "utf8");
+  const m = text.match(/^---\n([\s\S]*?)\n---\n/);
+  if (!m) { console.log("no frontmatter block"); process.exit(1); }
+  const line = m[1].split("\n").find(l => /^description:/.test(l));
+  if (!line) { console.log("no description"); process.exit(1); }
+  const v = line.replace(/^description:\s*/, "");
+  let ok = false, why = "";
+  if (v.startsWith("\"")) { try { ok = typeof JSON.parse(v) === "string" && JSON.parse(v).trim() !== ""; } catch (e) { why = "bad double-quoted scalar"; } }
+  else if (v.startsWith("\x27")) { ok = /^\x27([^\x27]|\x27\x27)+\x27$/.test(v); why = "bad single-quoted scalar"; }
+  else if (v === "") { why = "empty"; }
+  else if (/^[-?:,\[\]{}#&*!|>%@`\x27"]/.test(v)) { why = "plain scalar starts with an indicator"; }
+  else if (/: |\s#/.test(v) || v.endsWith(":")) { why = "plain scalar contains \": \" or \" #\" (quote it)"; }
+  else if (/^(true|false|yes|no|on|off|null|~|[-+]?(\.inf|\.nan|[0-9][0-9_]*(\.[0-9]*)?([eE][-+]?[0-9]+)?|0x[0-9a-fA-F]+|0o[0-7]+))$/i.test(v)) { why = "plain scalar resolves to a non-string (quote it)"; }
+  else { ok = true; }
+  if (!ok) { console.log(why || "invalid"); process.exit(1); }
+'
+HAVE_PSYCH=0
+command -v ruby >/dev/null 2>&1 && ruby -rpsych -e '' 2>/dev/null && HAVE_PSYCH=1
+for f in "$REPO_ROOT"/commands/*.md; do
+  rel="commands/$(basename "$f")"
+  if why=$(node -e "$FM_CHECK" "$f" 2>&1); then
+    pass "$rel has a valid frontmatter description"
+  else
+    fail "$rel has a valid frontmatter description ($why)"
+  fi
+  if [ "$HAVE_PSYCH" = 1 ]; then
+    if ruby -rpsych -e 'fm = File.read(ARGV[0])[/\A---\n(.*?)\n---\n/m, 1]; d = Psych.safe_load(fm)["description"]; exit((d.is_a?(String) && !d.strip.empty?) ? 0 : 1)' "$f" 2>/dev/null; then
+      pass "$rel frontmatter parses as YAML (Psych)"
+    else
+      fail "$rel frontmatter parses as YAML (Psych)"
+    fi
+  fi
+done
+[ "$HAVE_PSYCH" = 1 ] || echo "  SKIP: ruby/Psych not available (structural check only)"
+
+# #50: every Gemini TOML command points at something that exists: a skill by its
+# frontmatter name (`Invoke the metaswarm <name> skill`), or a command file
+# (`commands/<name>.md`). There is no `start-task` skill, for example; it is `start`.
+echo "Gemini TOML targets"
+TOML_COUNT=0
+for toml in "$REPO_ROOT"/commands/metaswarm/*.toml; do
+  TOML_COUNT=$((TOML_COUNT + 1))
+  name="$(basename "$toml" .toml)"
+  skill="$(sed -n 's/.*Invoke the metaswarm \([a-z0-9-]*\) skill.*/\1/p' "$toml" | head -1)"
+  cmdfile="$(sed -n 's/.*`commands\/\([a-z0-9-]*\)\.md`.*/\1/p' "$toml" | head -1)"
+  if [ -n "$skill" ]; then
+    if [ -f "$REPO_ROOT/skills/$skill/SKILL.md" ] && grep -q "^name: $skill\$" "$REPO_ROOT/skills/$skill/SKILL.md"; then
+      pass "$name.toml invokes the existing '$skill' skill"
+    else
+      fail "$name.toml invokes a '$skill' skill that does not exist (no skills/$skill/SKILL.md with name: $skill)"
+    fi
+  elif [ -n "$cmdfile" ]; then
+    [ -f "$REPO_ROOT/commands/$cmdfile.md" ] && pass "$name.toml follows the existing commands/$cmdfile.md" || fail "$name.toml points at missing commands/$cmdfile.md"
+  else
+    fail "$name.toml names neither a skill nor a commands/<name>.md file"
+  fi
+done
+[ "$TOML_COUNT" -ge 13 ] && pass "checked $TOML_COUNT TOML commands" || fail "only $TOML_COUNT TOML commands found (expected >= 13)"
+
+# #74: `metaswarm install` does not exist (cli/metaswarm.js dispatches init,
+# setup, detect and --version). Historical records are exempt: CHANGELOG
+# entries for past releases, docs/plans and the knowledge base's gotcha.
+echo "No nonexistent 'metaswarm install' command"
+# git grep scans every tracked file (any type, names with spaces); exit 1 means
+# no match, anything above 1 is a real error and fails the check.
+INSTALL_RC=0
+INSTALL_HITS="$(git -C "$REPO_ROOT" grep -nIE 'metaswarm(@[A-Za-z0-9.]+)? install([^A-Za-z0-9_-]|$)' -- . \
+  ':!CHANGELOG.md' ':!docs/plans/' ':!.beads/' ':!tests/commands/test-command-sources.sh')" || INSTALL_RC=$?
+if [ "$INSTALL_RC" -gt 1 ]; then
+  fail "'metaswarm install' check: git grep failed (rc=$INSTALL_RC)"
+else
+  [ -z "$INSTALL_HITS" ] && pass "no tracked file tells users to run 'metaswarm install'" || fail "'metaswarm install' is referenced: $INSTALL_HITS"
+fi
+
+# #91: every bin/ script a skill, command, agent, template or doc tells the
+# agent to run must ship in bin/. Historical records and tests are exempt.
+echo "Referenced bin/ scripts exist"
+BIN_RC=0
+# Each match is the whole path token, so absolute and system paths
+# (/usr/bin/env, #!/usr/bin/env bash, ~/bin) and node_modules/.bin/ can be told
+# apart from the plugin's bin/. Any extension counts, or none (bin/metaswarm-usage).
+BIN_REFS="$(git -C "$REPO_ROOT" grep -ohIE "[^[:space:]\"'\`()<>|]*bin/[A-Za-z0-9_-]+(\.[A-Za-z0-9]+)?" -- . \
+  ':!CHANGELOG.md' ':!docs/plans/' ':!.beads/' ':!tests/')" || BIN_RC=$?
+if [ "$BIN_RC" -gt 1 ]; then
+  fail "bin/ reference check: git grep failed (rc=$BIN_RC)"
+else
+  BIN_NAMES="$(printf '%s\n' "$BIN_REFS" | grep -vE '^([/~]|#!)|(^|/)(usr|opt|etc|sbin)/' |
+    grep -E '(^|/)bin/[A-Za-z0-9_-]+(\.[A-Za-z0-9]+)?$' |
+    sed -nE 's#.*bin/([A-Za-z0-9_.-]+)$#\1#p' | sort -u || true)"
+  BIN_COUNT=0
+  BIN_MISSING=""
+  while IFS= read -r name; do
+    [ -n "$name" ] || continue
+    BIN_COUNT=$((BIN_COUNT + 1))
+    [ -f "$REPO_ROOT/bin/$name" ] || BIN_MISSING="$BIN_MISSING $name"
+  done <<EOF
+$BIN_NAMES
+EOF
+  # The repo references at least pr-comments-check, pr-comments-filter,
+  # metaswarm-agents and external-tools-verify; fewer means the grep broke.
+  if [ "$BIN_COUNT" -lt 4 ]; then
+    fail "bin/ reference check found only $BIN_COUNT script names (expected at least 4)"
+  elif [ -n "$BIN_MISSING" ]; then
+    fail "referenced bin/ scripts that do not exist:$BIN_MISSING"
+  else
+    pass "all $BIN_COUNT referenced bin/ scripts exist"
+  fi
+fi
+
+echo ""
+echo "Results: $PASS passed, $FAIL failed"
+DONE=1
+[ "$FAIL" -eq 0 ] || exit 1

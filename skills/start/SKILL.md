@@ -24,7 +24,6 @@ This skill coordinates a swarm of specialized AI agents to autonomously handle G
 ```bash
 # User triggers via any of:
 @beads start #123
-bd start 123
 /beads-start 123
 ```
 
@@ -50,8 +49,9 @@ bd doctor         # Check system health
 | **Designer Agent**        | UX/API design review           | Design review gate (parallel)      |
 | **Security Design Agent** | Security threat modeling       | Design review gate (parallel)      |
 | **CTO Agent**             | TDD readiness & plan review    | Design review gate (parallel)      |
+| **UX Reviewer Agent**     | User flows, UI states, integration wiring | Design review gate (parallel)      |
 | **Coder Agent**           | TDD implementation             | Design review gate approved        |
-| **Code Review Agent**     | Internal code review           | Implementation complete            |
+| **Adversarial Reviewer**  | Internal code review           | Implementation complete            |
 | **Security Auditor**      | Security review (code)         | Implementation complete            |
 | **Release Engineer Agent** | Safe delivery from merge through production | QA approves PR, PR reaches merge readiness |
 | **PR Shepherd**           | PR lifecycle management        | PR created                         |
@@ -62,25 +62,27 @@ See `./agents/` directory for detailed agent definitions.
 
 ## Design Review Gate (NEW)
 
-For complex features created via brainstorming, an automatic **Design Review Gate** ensures quality before implementation:
+For project-sized features (brainstorming sized the work as a project and committed its design doc; see [`./guides/workflow-enforcement.md`](./guides/workflow-enforcement.md)), an automatic **Design Review Gate** ensures quality before implementation:
 
 ```
-Design Document Created
+Project-Sized Design Doc Committed
         │
         ▼
 ┌─────────────────────────────────────────────────┐
 │           DESIGN REVIEW GATE                     │
 │                                                  │
-│  Spawns in PARALLEL:                            │
+│  Spawns 6 reviewers in PARALLEL:                │
+│  • PM Agent (use cases, user benefit)           │
 │  • Architect Agent (technical architecture)     │
 │  • Designer Agent (UX/API design)               │
+│  • Security Design Agent (threat model)         │
 │  • UX Reviewer (user flows, integration WUs)    │
 │  • CTO Agent (TDD readiness)                    │
 │                                                  │
-│  ALL must approve to proceed                    │
+│  ALL SIX must approve to proceed                │
 └─────────────────────────────────────────────────┘
         │
-        ├── Any NEEDS_REVISION? → Iterate on design (max 3x)
+        ├── Any NEEDS_REVISION? → Iterate on design (severity-gated, cap 10 rounds)
         │
        ALL APPROVED
         │
@@ -90,9 +92,11 @@ Design Document Created
 
 ### Triggering the Design Review Gate
 
-The gate is automatically triggered when:
+Load the `brainstorming-extension` skill at the start of brainstorming, not only after the commit: its assumption ledger, confirmation rule and Common misreadings checklist apply to every brainstorming session regardless of size, before any design is presented or committed.
 
-- `superpowers:brainstorming` completes and commits a design doc
+The gate is automatically triggered when brainstorming writes and commits a project-sized design doc (see [`./guides/workflow-enforcement.md`](./guides/workflow-enforcement.md)):
+
+- A project-sized design doc is committed to `docs/plans/*-design.md` or `docs/superpowers/specs/*-design.md`
 - User runs `/review-design <path-to-design.md>`
 
 ### Review Criteria by Agent
@@ -108,9 +112,9 @@ The gate is automatically triggered when:
 
 ### Iteration Protocol
 
-- **Max 3 iterations** before human escalation
+- **Severity-gated iteration** (cap 10 rounds; see `./guides/delivery-scope.md`): only `blocker: yes` findings keep the loop going; minor/nit findings become follow-ups. A Clarify signal (the user is needed or the reviews are not converging) stops the loop for a Clarification report
 - Each iteration: revise design → re-run all reviewers
-- Escalation options: Override / Defer / Cancel
+- Escalation options: Revise / Clarify the requirement / re-brainstorm / Narrow scope / Defer / Cancel. A Clarification report offers Answer / Keep iterating / Narrow scope / Defer / Cancel. Neither approves: a revised design gets a fresh review round
 
 See the `design-review-gate` skill for full details.
 
@@ -126,7 +130,7 @@ For the full Team Mode protocol — including message routing, context sharing, 
 
 ## Plan Review Gate
 
-After the Architect creates an implementation plan and before it reaches the Design Review Gate, the plan passes through the **Plan Review Gate**. Three adversarial reviewers validate the plan independently:
+Once an implementation plan is written, it passes through the **Plan Review Gate** before it is presented. In full orchestration that is before the Design Review Gate, which then reviews the plan; on the brainstorming path the Design Review Gate has already reviewed the design doc (see [`./guides/workflow-enforcement.md`](./guides/workflow-enforcement.md#two-pipelines)). Three adversarial reviewers validate the plan independently:
 
 | Reviewer | Focus |
 | --- | --- |
@@ -159,7 +163,7 @@ For each work unit (a discrete, spec-driven change with DoD items):
 3. **ADVERSARIAL REVIEW** — Fresh review subagent checks against spec contract. Binary PASS/FAIL with file:line evidence. Uses `adversarial-review-rubric.md`. When external tools are configured, cross-model review ensures the writer is always reviewed by a different AI model (see External Tools section below).
 4. **COMMIT** — Only after adversarial PASS. Updates `SERVICE-INVENTORY.md` and Project Context Document.
 
-On FAIL: fix → re-validate → spawn **fresh** reviewer (max 3 retries → escalate to human). There is NO path from FAIL to COMMIT without passing through the retry loop.
+On FAIL: fix → re-validate → spawn **fresh** reviewer (role type `roleType("adversarial-reviewer")`; severity-gated iteration, cap 10 rounds; see `./guides/delivery-scope.md` → escalate to human when the rule says so). There is NO path from FAIL to COMMIT without passing through the retry loop.
 
 ### When to Use Orchestrated Execution
 
@@ -190,7 +194,7 @@ For simple tasks, the standard linear flow (implement → code review → PR) wo
 
 **Adversarial Review**: Fundamentally different from collaborative code review. The reviewer is an independent auditor checking spec compliance, not a helpful colleague suggesting improvements. Binary PASS/FAIL verdict. Evidence required (file:line references).
 
-**Fresh Reviewer Rule**: On re-review after FAIL, a NEW reviewer instance is spawned with no memory of the previous review. This prevents anchoring bias.
+**Fresh Reviewer Rule**: On re-review after FAIL, a NEW reviewer instance (role type `roleType("adversarial-reviewer")`) is spawned with no memory of the previous review. This prevents anchoring bias.
 
 **Human Checkpoints**: Planned pauses at critical boundaries (schema changes, security code, first use of new patterns). The orchestrator waits for explicit human approval before continuing.
 
@@ -310,7 +314,7 @@ GitHub Issue #123 (agent-ready label)
 │  │(users)  │ │  (tech)  │ │ (UX/API) │ │ (threats)│ │(flows) │ │ (TDD) │ │
 │  └─────────┘ └──────────┘ └──────────┘ └──────────┘ └────────┘ └───────┘ │
 │                                                                           │
-│  ALL SIX must approve (max 3 iterations)                                  │
+│  ALL SIX must approve (severity-gated iteration, cap 10 rounds)           │
 └──────────────────────────────────────────────────────────────────────────┘
         │
         ▼
@@ -343,9 +347,9 @@ GitHub Issue #123 (agent-ready label)
         │
         ▼
 ┌─────────────────────────────────────┐
-│   PR Creation (Auto-Shepherd)        │
-│   bin/create-pr-with-shepherd.sh     │
-│   → Auto-invokes pr-shepherd skill   │
+│   PR Creation                        │
+│   gh pr create                       │
+│   → then /pr-shepherd <pr-number>    │
 └─────────────────────────────────────┘
         │
         ▼
@@ -394,15 +398,13 @@ If the CI check is stale: `gh workflow run gtg.yml -f pr_number=<PR_NUMBER>`
 
 ### Automatic PR Review Cycles
 
-When a PR is created via `bin/create-pr-with-shepherd.sh`, the script outputs instructions to start monitoring:
+Every PR gets the same cycle, however it was created:
 
-1. **Creates the PR** with proper title/body
-2. **Start pr-shepherd** using `/pr-shepherd <pr-number>`
+1. **Create the PR** with `gh pr create` and a proper title/body
+2. **Start pr-shepherd** right away with `/pr-shepherd <pr-number>`
 3. **PR Shepherd monitors**: CI status, review comments, thread resolution
 4. **Auto-fixes**: Lint, type errors, test failures in your code
 5. **Reports when ready**: All CI green, all threads resolved
-
-For manually-created PRs, invoke `/pr-shepherd <pr-number>` to start the monitoring cycle.
 
 ---
 
@@ -412,7 +414,7 @@ For manually-created PRs, invoke `/pr-shepherd <pr-number>` to start the monitor
 
 ```bash
 # Create epic for GitHub Issue
-bd create "Feature: User Auth" --type epic --issue 123
+bd create "Feature: User Auth" --type epic --external-ref gh-123
 
 # Create task under epic
 bd create "Research auth patterns" --type task --parent bd-abc123
@@ -462,11 +464,14 @@ bd label add <task-id> review:iteration-1
 ### Sync Operations
 
 ```bash
-# Check sync status
-bd sync --status
+# Check version-control status (branch and uncommitted changes)
+bd vc status
 
-# Pull updates from main
-bd sync --from-main
+# If a Dolt remote is configured: pull updates (local-only workspaces need no sync)
+bd dolt pull
+
+# If a Dolt remote is configured: push your changes (local-only workspaces need no sync)
+bd dolt push
 
 # Export to JSONL
 bd export
@@ -490,7 +495,7 @@ gh issue view 123 --json labels | jq '.labels[].name' | grep agent-ready
 ISSUE=$(gh issue view 123 --json title,body,number)
 
 # Create epic linked to Issue
-bd create "$(echo $ISSUE | jq -r .title)" --type epic --issue 123 --json
+bd create "$(echo $ISSUE | jq -r .title)" --type epic --external-ref gh-123 --json
 ```
 
 ### Step 3: Post Acknowledgment
@@ -505,7 +510,7 @@ Use the Task tool to spawn the Issue Orchestrator agent:
 
 ```typescript
 Task({
-  subagent_type: "general-purpose",
+  subagent_type: roleType("issue-orchestrator"),
   description: "Issue Orchestrator for #123",
   prompt: `You are the ISSUE ORCHESTRATOR agent.
 
@@ -531,9 +536,14 @@ Follow the workflow phases exactly as specified.`,
 2. **Conflicting Constraints**: Can't satisfy all requirements
 3. **Risk Decision**: Security or data concerns
 4. **Blocked > 1 Hour**: External dependency needed
-5. **3 Failed Iterations**: Agent can't resolve issue
+5. **Severity Rule Escalates**: Review cap of 10 rounds hit, or a blocker recurs or is disputed (see `./guides/delivery-scope.md`)
+6. **Clarify Signal**: the severity rule's line 2 fires (the user is needed or the reviews are not converging); this is a stop for the user, not an escalation
 
 ### How to Escalate
+
+**Severity-rule escalations never use this template.** When a review gate escalates (the 10-round cap, or a recurring or disputed blocker), still mark the task waiting (`bd update <task-id> --status blocked` and `bd label add <task-id> waiting:human`), then post the Review Escalation report from the Escalation template in `./guides/delivery-scope.md` instead. Its options are **Revise**, **Clarify the requirement / re-brainstorm**, **Narrow scope**, **Defer** and **Cancel**, and any revised or narrowed work gets a fresh review round that it must pass. A Clarify signal (rule line 2) uses the Clarification report from the Clarify section of the same guide instead: run the misunderstanding analysis first, then wait for the user's answer. "Keep going" never defaults a `needs_user` question. There is no `@beads approve` for an escalated review gate: escalation never approves, and a Clarification never approves either.
+
+For triggers 1-4:
 
 ```bash
 # Mark task as waiting
@@ -562,6 +572,8 @@ EOF
 
 ### Human Response Patterns
 
+`@beads approve` unblocks a task waiting on triggers 1-4. It is never for an escalated review gate, which passes only by a fresh review round.
+
 ```bash
 # Approve a blocked task
 @beads approve bd-abc123
@@ -580,19 +592,21 @@ EOF
 
 ## Agent Spawning Patterns
 
+Every `subagent_type` below is a role type resolved per [Role type resolution](./guides/agent-coordination.md#role-type-resolution).
+
 ### Sequential Spawning
 
 ```typescript
 // Spawn Researcher first
 const researchResult = await Task({
-  subagent_type: "general-purpose",
+  subagent_type: roleType("researcher"),
   description: "Research for issue #123",
   prompt: researcherPrompt,
 });
 
 // Then spawn Architect with research output
 const planResult = await Task({
-  subagent_type: "general-purpose",
+  subagent_type: roleType("planner"),
   description: "Planning for issue #123",
   prompt: architectPrompt + researchResult,
 });
@@ -604,14 +618,14 @@ const planResult = await Task({
 // Spawn Code Review and Security Audit in parallel
 const [reviewResult, securityResult] = await Promise.all([
   Task({
-    subagent_type: "general-purpose",
+    subagent_type: roleType("adversarial-reviewer"),
     description: "Code review for #123",
-    prompt: codeReviewPrompt,
+    prompt: codeReviewPrompt, // role: code reviewer, stated in the prompt
   }),
   Task({
-    subagent_type: "general-purpose",
+    subagent_type: roleType("adversarial-reviewer"),
     description: "Security audit for #123",
-    prompt: securityAuditPrompt,
+    prompt: securityAuditPrompt, // role: security auditor, stated in the prompt
   }),
 ]);
 ```
@@ -624,32 +638,26 @@ const [reviewResult, securityResult] = await Promise.all([
 
 **ALL agents MUST prime their context before starting ANY work.** This prevents bad assumptions and ensures alignment with established patterns.
 
-```bash
-# General prime (loads critical rules + gotchas)
-bd prime
+Use `/prime` (metaswarm knowledge priming). It filters the knowledge base (`.beads/knowledge/*.jsonl`) with `jq`, by keyword (over each fact and its tags), by file (over its affected files) and by work type (over its fact type):
 
-# Prime for specific files you'll modify
-bd prime --files "src/lib/services/*.ts" "src/api/routes/*.ts"
-
-# Prime for specific topic
-bd prime --keywords "authentication" "jwt"
-
-# Prime for work type
-bd prime --work-type planning     # Before planning
-bd prime --work-type implementation  # Before coding
-bd prime --work-type review       # Before reviewing
-bd prime --work-type research     # Before exploring
-
-# Combined (most thorough)
-bd prime --files "<files>" --keywords "<topic>" --work-type <type>
+```text
+/prime                                         # MUST FOLLOW rules + gotchas
+/prime src/lib/services/ src/api/routes/       # files you'll modify
+/prime authentication jwt                      # a topic
+/prime planning                                # work type: planning, implementation, review, research
+/prime <topic> <files> <work-type>             # combined (most thorough)
 ```
 
-The prime command outputs relevant facts categorized as:
+See `commands/prime.md` for the exact `jq` filters. `/prime` reports the relevant facts categorized as:
 
 - **MUST FOLLOW**: Critical rules (NEVER/ALWAYS/MUST statements)
 - **GOTCHAS**: Common pitfalls to avoid
 - **PATTERNS**: Best practices for this codebase
 - **DECISIONS**: Architectural choices
+
+### Context Recovery
+
+After compaction or in a new session with an active plan: if bd is installed, `bd prime` (bd context); then read `.beads/plans/active-plan.md` and `.beads/context/*.md`; then `/prime` for knowledge. Also check `.beads/context/review-history/` for a non-closed file: it is an interrupted review gate. Resume that gate at its next round, and if its `status` is `clarify-pending`, re-ask the pending questions instead of iterating.
 
 ### After Completing Work
 
@@ -661,20 +669,17 @@ GITHUB_TOKEN=$(gh auth token) npx tsx scripts/beads-fetch-pr-comments.ts --days 
 
 # Use self-reflect skill to evaluate and add learnings
 /self-reflect
-
-# Compact closed issues (semantic summarization via beads plugin)
-bd compact
 ```
 
 Or spawn Knowledge Curator agent:
 
 ```typescript
 Task({
-  subagent_type: "general-purpose",
+  subagent_type: roleType("knowledge-curator-agent"),
   description: "Extract learnings from epic",
   prompt: `Review completed epic <epic-id> and extract learnings.
 
-FIRST: Run \`bd prime --work-type review\` to load context.
+FIRST: Run \`/prime\` (metaswarm knowledge priming) for review work on this epic.
 
 Then analyze:
 - What patterns were used?
@@ -771,14 +776,14 @@ bd dep remove <task1> <task2>
 ### BEADS Sync Issues
 
 ```bash
-# Check sync status
-bd sync --status
+# Check version-control status (branch and uncommitted changes)
+bd vc status
 
 # Force export
 bd export
 
-# Pull from main
-bd sync --from-main
+# If a Dolt remote is configured: pull the latest (local-only workspaces need no sync)
+bd dolt pull
 ```
 
 ---
@@ -790,14 +795,15 @@ skills/start/                   # This skill (main orchestration)
 ├── SKILL.md                    # This file
 ├── agents/                     # Agent definitions
 │   ├── issue-orchestrator.md   # Main coordinator (runs 4-phase loop)
-│   ├── researcher-agent.md     # Codebase exploration
+│   ├── researcher.md     # Codebase exploration
 │   ├── architect-agent.md      # Implementation planning
 │   ├── product-manager-agent.md # Use case & user benefit review
 │   ├── designer-agent.md       # UX/API design review
 │   ├── security-design-agent.md # Security threat modeling
+│   ├── ux-reviewer-agent.md    # User flows, UI states, integration wiring
 │   ├── cto-agent.md            # TDD readiness review
-│   ├── coder-agent.md          # TDD implementation
-│   ├── code-review-agent.md    # Internal code review (collaborative + adversarial modes)
+│   ├── coder.md          # TDD implementation
+│   ├── adversarial-reviewer.md    # Internal code review (collaborative + adversarial modes)
 │   ├── security-auditor-agent.md # Security review (implementation)
 │   ├── release-engineer-agent.md # Merge → deploy → verify → release
 │   └── pr-shepherd-agent.md    # PR lifecycle management
@@ -810,9 +816,10 @@ skills/start/                   # This skill (main orchestration)
 │   └── build-validation.md     # Pre-push checks, CI pipeline
 ├── rubrics/                    # Review rubrics
 │   ├── plan-review-rubric.md   # Used by CTO Agent
-│   ├── code-review-rubric.md   # Used by Code Review Agent (collaborative mode)
-│   ├── adversarial-review-rubric.md # Used by Code Review Agent (adversarial mode)
+│   ├── code-review-rubric.md   # Used by Adversarial Reviewer (collaborative mode)
+│   ├── adversarial-review-rubric.md # Used by Adversarial Reviewer (adversarial mode)
 │   ├── security-review-rubric.md # Used by Security Auditor Agent
+│   ├── ux-review-rubric.md     # Used by UX Reviewer Agent
 │   └── release-engineering-rubric.md # Used by Release Engineer Agent
 └── references/                 # Reference docs for other tools
     ├── codex-tools.md          # OpenAI Codex CLI reference

@@ -7,9 +7,9 @@
 #   review     Review code changes (read-only sandbox) against a rubric/spec
 #
 # Usage:
-#   codex.sh health
-#   codex.sh implement --worktree <path> --prompt-file <path> [--attempt N] [--timeout S] [--context-dir <dir>]
-#   codex.sh review   --worktree <path> --rubric-file <path> --spec-file <path> [--attempt N] [--timeout S]
+#   codex.sh health [--role <role>]
+#   codex.sh implement --worktree <path> --prompt-file <path> [--attempt N] [--timeout S] [--context-dir <dir>] [--role <role>]
+#   codex.sh review   --worktree <path> --rubric-file <path> --spec-file <path> [--attempt N] [--timeout S] [--role <role>]
 
 set -euo pipefail
 
@@ -29,6 +29,9 @@ DEFAULT_MODEL="gpt-5.3-codex"
 # health — Preflight check
 # ===========================================================================
 cmd_health() {
+  parse_args "$@"
+  local model
+  model="$(resolve_model "$TOOL_NAME" "$XT_ROLE")" || return 1
   local status="ready"
   local version="unknown"
   local auth_valid=false
@@ -36,7 +39,7 @@ cmd_health() {
   # Check if codex binary exists
   if ! command -v "$TOOL_CMD" >/dev/null 2>&1; then
     printf '{"tool":"%s","status":"unavailable","version":"not_installed","auth_valid":false,"model":"%s"}\n' \
-      "$TOOL_NAME" "$DEFAULT_MODEL"
+      "$TOOL_NAME" "$model"
     return 0
   fi
 
@@ -63,11 +66,11 @@ cmd_health() {
       --arg status "$status" \
       --arg version "$version" \
       --argjson auth_valid "$auth_valid" \
-      --arg model "$DEFAULT_MODEL" \
+      --arg model "$model" \
       '{tool: $tool, status: $status, version: $version, auth_valid: $auth_valid, model: $model}'
   else
     printf '{"tool":"%s","status":"%s","version":"%s","auth_valid":%s,"model":"%s"}\n' \
-      "$TOOL_NAME" "$status" "$version" "$auth_valid" "$DEFAULT_MODEL"
+      "$TOOL_NAME" "$status" "$version" "$auth_valid" "$model"
   fi
 }
 
@@ -76,6 +79,12 @@ cmd_health() {
 # ===========================================================================
 cmd_implement() {
   parse_args "$@"
+  local model cfg_model
+  cfg_model="$(configured_model "$TOOL_NAME" "$XT_ROLE")" || return 1
+  model="${cfg_model:-$DEFAULT_MODEL}"
+  # Only pass -m when a model is configured; otherwise the user's ~/.codex config applies
+  local model_args=()
+  [[ -n "$cfg_model" ]] && model_args=(-m "$cfg_model")
 
   # Validate required arguments
   if [[ -z "$XT_WORKTREE" ]]; then
@@ -117,7 +126,7 @@ cmd_implement() {
       PATH="$PATH" \
       OPENAI_API_KEY="${OPENAI_API_KEY:-}" \
       CODEX_API_KEY="${CODEX_API_KEY:-}" \
-    "$TOOL_CMD" exec --full-auto --json -C "$XT_WORKTREE" "$prompt_content" \
+    "$TOOL_CMD" exec --full-auto --json ${model_args[@]+"${model_args[@]}"} -C "$XT_WORKTREE" "$prompt_content" \
     || exit_code=$?
 
   # Calculate duration
@@ -144,7 +153,7 @@ cmd_implement() {
     error_json="$(emit_error \
       "$TOOL_NAME" \
       "implement" \
-      "$DEFAULT_MODEL" \
+      "$model" \
       "$XT_ATTEMPT" \
       "$exit_code" \
       "$stderr_file" \
@@ -206,7 +215,7 @@ cmd_implement() {
   result_json="$(emit_json \
     "$TOOL_NAME" \
     "implement" \
-    "$DEFAULT_MODEL" \
+    "$model" \
     "$XT_ATTEMPT" \
     "$exit_code" \
     "$branch" \
@@ -229,6 +238,12 @@ cmd_implement() {
 # ===========================================================================
 cmd_review() {
   parse_args "$@"
+  local model cfg_model
+  cfg_model="$(configured_model "$TOOL_NAME" "$XT_ROLE")" || return 1
+  model="${cfg_model:-$DEFAULT_MODEL}"
+  # Only pass -m when a model is configured; otherwise the user's ~/.codex config applies
+  local model_args=()
+  [[ -n "$cfg_model" ]] && model_args=(-m "$cfg_model")
 
   # Validate required arguments
   if [[ -z "$XT_WORKTREE" ]]; then
@@ -290,15 +305,22 @@ PROMPT_TEMPLATE
 
 ## Instructions
 1. Evaluate each criterion in the rubric against the diff and spec.
-2. For each finding, provide:
-   - Verdict: PASS or FAIL
-   - Classification: BLOCKING or WARNING
-   - Citation: file:line reference(s)
-   - Explanation: why the finding was made
+2. For each finding, provide these fields:
+   - title: <short label, ≤ ~80 chars>
+   - description: <1-3 sentences: what is wrong and why it matters>
+   - severity: critical | major | minor | nit
+   - protects: the credible user scenario, explicit requirement or DoD item the finding protects (required for critical/major)
+   - evidence: file:line reference(s), or expected-vs-found
+   - blocker: yes | no (yes only if severity is critical or major AND protects is non-empty)
+   - theme: <short label> (every finding)
+   - needs_user: yes | no (blockers only: yes only if just the user can answer it)
+   - origin: implementation | requirement | assumption (blockers only)
+   - assumption: <ledger id such as A3, or a quoted decision> (when origin is assumption)
+   A critical or major finding without protects is advisory: report it with blocker: no.
 3. At the end, provide an overall verdict: PASS or FAIL.
-   - FAIL if any BLOCKING issue is found.
-   - PASS if only WARNING issues or no issues.
-4. Output your review as structured JSON with keys: "verdict", "findings" (array), "summary".
+   - FAIL only if at least one finding has blocker: yes.
+   - Otherwise PASS, including when there are minor, nit or advisory findings.
+4. Output your review as structured JSON with keys: "verdict", "findings" (array of objects with keys "title", "description", "severity", "protects", "evidence", "blocker", "theme", plus "needs_user", "origin" and "assumption" on blockers), "summary".
 PROMPT_FOOTER
 )"
 
@@ -314,7 +336,7 @@ PROMPT_FOOTER
       PATH="$PATH" \
       OPENAI_API_KEY="${OPENAI_API_KEY:-}" \
       CODEX_API_KEY="${CODEX_API_KEY:-}" \
-    "$TOOL_CMD" exec --sandbox read-only --json -C "$XT_WORKTREE" "$review_prompt" \
+    "$TOOL_CMD" exec --sandbox read-only --json ${model_args[@]+"${model_args[@]}"} -C "$XT_WORKTREE" "$review_prompt" \
     || exit_code=$?
 
   # Calculate duration
@@ -337,7 +359,7 @@ PROMPT_FOOTER
     error_json="$(emit_error \
       "$TOOL_NAME" \
       "review" \
-      "$DEFAULT_MODEL" \
+      "$model" \
       "$XT_ATTEMPT" \
       "$exit_code" \
       "$stderr_file" \
@@ -368,7 +390,7 @@ PROMPT_FOOTER
   result_json="$(emit_json \
     "$TOOL_NAME" \
     "review" \
-    "$DEFAULT_MODEL" \
+    "$model" \
     "$XT_ATTEMPT" \
     "$exit_code" \
     "$branch" \
@@ -394,7 +416,7 @@ shift || true
 
 case "$command" in
   health)
-    cmd_health
+    cmd_health "$@"
     ;;
   implement)
     cmd_implement "$@"
@@ -417,6 +439,10 @@ Options (implement):
   --attempt <N>           Attempt number (default: 1)
   --timeout <seconds>     Timeout in seconds (default: 300)
   --context-dir <dir>     Restrict changes to this directory
+  --role <role>           metaswarm role; model from .metaswarm/models.yaml
+
+Options (health):
+  --role <role>           metaswarm role; model from .metaswarm/models.yaml
 
 Options (review):
   --worktree <path>       Path to the git worktree (required)
@@ -424,6 +450,7 @@ Options (review):
   --spec-file <path>      Path to the specification file (required)
   --attempt <N>           Attempt number (default: 1)
   --timeout <seconds>     Timeout in seconds (default: 300)
+  --role <role>           metaswarm role; model from .metaswarm/models.yaml
 
 Environment variables:
   OPENAI_API_KEY          OpenAI API key for authentication

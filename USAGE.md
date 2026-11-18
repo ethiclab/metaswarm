@@ -2,7 +2,7 @@
 
 ## Agents
 
-metaswarm provides 18 specialized agents, each with a defined role in the software development lifecycle.
+metaswarm provides 23 agents, each with a defined role in the software development lifecycle.
 
 ### Orchestration Agents
 
@@ -15,25 +15,29 @@ metaswarm provides 18 specialized agents, each with a defined role in the softwa
 
 | Agent | File | Role |
 |---|---|---|
-| **Researcher** | `agents/researcher-agent.md` | Codebase exploration, pattern discovery, dependency analysis. |
+| **Researcher** | `agents/researcher.md` | Codebase exploration, pattern discovery, dependency analysis. Read-only; Sonnet by default. |
+| **Planner** | `agents/planner.md` | Plan and decompose into work units. Opus by default; can write plan files. |
+| **Design Reviewer** | `agents/design-reviewer.md` | Design review gate reviewer; role (PM, Architect, Designer, Security, UX Reviewer, CTO) passed in the prompt. Opus, read-only. |
+| **Plan Reviewer** | `agents/plan-reviewer.md` | Plan review gate reviewer (Feasibility, Completeness, Scope & Alignment). Opus, read-only. |
 | **Architect** | `agents/architect-agent.md` | Implementation planning, service structure design, pattern selection. |
 | **Product Manager** | `agents/product-manager-agent.md` | Use case validation, user benefit review, scope verification. |
 | **Designer** | `agents/designer-agent.md` | UX/API design review, developer experience, consistency. |
 | **Security Design** | `agents/security-design-agent.md` | Threat modeling (STRIDE), auth/authz design, OWASP Top 10. |
+| **UX Reviewer** | `agents/ux-reviewer-agent.md` | User flows (trigger and visible outcome), empty/loading/error states, integration work unit wiring components into the app shell. |
 | **CTO** | `agents/cto-agent.md` | TDD readiness review, plan approval, codebase alignment. |
 
 ### Implementation Agents
 
 | Agent | File | Role |
 |---|---|---|
-| **Coder** | `agents/coder-agent.md` | TDD implementation (RED-GREEN-REFACTOR). 100% coverage required. |
+| **Coder** | `agents/coder.md` | TDD implementation (RED-GREEN-REFACTOR). 100% coverage required. |
 | **Test Automator** | `agents/test-automator-agent.md` | Test generation and coverage enforcement. |
 
 ### Review Agents
 
 | Agent | File | Role |
 |---|---|---|
-| **Code Reviewer** | `agents/code-review-agent.md` | Internal pre-PR review, pattern enforcement, test verification. |
+| **Adversarial Reviewer** | `agents/adversarial-reviewer.md` | Internal pre-PR review, pattern enforcement, test verification. Opus, read-only. |
 | **Security Auditor** | `agents/security-auditor-agent.md` | Security code review, vulnerability scanning. |
 
 ### PR & Delivery Agents
@@ -41,6 +45,7 @@ metaswarm provides 18 specialized agents, each with a defined role in the softwa
 | Agent | File | Role |
 |---|---|---|
 | **PR Shepherd** | `agents/pr-shepherd-agent.md` | PR lifecycle: CI monitoring, review comment handling, thread resolution. |
+| **Release Engineer** | `agents/release-engineer-agent.md` | Safe delivery of approved code from merge through production verification. |
 
 ### Support Agents
 
@@ -54,7 +59,7 @@ metaswarm provides 18 specialized agents, each with a defined role in the softwa
 
 ## Guides
 
-metaswarm ships 6 development guides in the `guides/` directory. These are reference documents for agents and humans working in the project.
+metaswarm ships 8 development guides in the `guides/` directory. These are reference documents for agents and humans working in the project.
 
 | Guide | File | Covers |
 |---|---|---|
@@ -64,6 +69,8 @@ metaswarm ships 6 development guides in the `guides/` directory. These are refer
 | **Coding Standards** | `guides/coding-standards.md` | Language idioms, naming conventions, error handling, code organization |
 | **Worktree Development** | `guides/worktree-development.md` | Parallel development with git worktrees, port allocation, conflict detection |
 | **Build Validation** | `guides/build-validation.md` | Pre-push checks, CI pipeline, build verification, release readiness |
+| **Delivery Scope** | `guides/delivery-scope.md` | Review severity rule: the finding contract, what blocks delivery, when to iterate, advance, clarify or escalate |
+| **Workflow Enforcement** | `guides/workflow-enforcement.md` | When the Design and Plan Review Gates trigger, the execution method choice, superpowers version support |
 
 ## Choosing a Workflow
 
@@ -115,7 +122,7 @@ The 4-phase execution loop for rigorous, spec-driven implementation. Decomposes 
 - **Project context document**: Maintained by orchestrator, passed to each coder subagent to prevent context loss
 - **Service inventory tracking**: `SERVICE-INVENTORY.md` updated after each commit to track services, factories, and shared modules
 - **Final comprehensive review**: Cross-unit integration check after all units pass
-- **Recovery protocol**: DIAGNOSE → CLASSIFY → RETRY (max 3) → ESCALATE with failure history
+- **Recovery protocol**: DIAGNOSE → CLASSIFY → RETRY (VALIDATE: up to 3 attempts; review: severity-gated, cap 10 rounds) → ESCALATE with failure history, or CLARIFY with the user when the severity rule says so
 
 Uses the `adversarial-review-rubric.md` for reviews (distinct from the collaborative `code-review-rubric.md`).
 
@@ -131,7 +138,7 @@ Spawns 6 agents in parallel to review a design document:
 
 - PM, Architect, Designer, Security, UX Reviewer, CTO review simultaneously
 - All 6 must APPROVE
-- Max 3 iterations before human escalation
+- Severity-gated iteration: only `blocker: yes` findings re-run the gate, cap 10 rounds before human escalation; a Clarify signal stops it earlier to ask you
 - Catches architectural issues before implementation begins
 
 ### PR Shepherd
@@ -175,7 +182,7 @@ Validates every implementation plan through 3 adversarial reviewers before execu
 - **Completeness Reviewer**: Checks for missing work units, untested edge cases, and gaps in the Definition of Done
 - **Scope & Alignment Reviewer**: Verifies the plan stays within the issue scope and aligns with codebase conventions
 
-All 3 reviewers must APPROVE before the plan proceeds to implementation. Sits between the planning phase and the Design Review Gate in the workflow pipeline.
+All 3 reviewers must APPROVE before the plan proceeds to implementation. In the full orchestration pipeline it sits between planning and the Design Review Gate, which then reviews the plan. On the `/start-task` brainstorming path it runs after the Design Review Gate has approved the design doc and the plan is written (see `guides/workflow-enforcement.md`).
 
 ### External Tools
 
@@ -214,7 +221,7 @@ Prerequisites: `npx playwright install chromium`
 | `/start` | Alias for `/start-task` |
 | `/setup` | Interactive project setup — detects language, framework, test runner, and configures everything |
 | `/update` | Update metaswarm plugin to latest version |
-| `/status` | Run 9 diagnostic checks on your installation |
+| `/metaswarm:status` | Run 12 diagnostic checks on your installation |
 | `/prime` | Load relevant knowledge before starting work |
 | `/review-design <path>` | Run the 6-agent Design Review Gate |
 | `/brainstorm` | Refine an idea before implementation |
@@ -233,7 +240,7 @@ Core commands for task tracking:
 
 ```bash
 # Issue Management
-bd create "Title" --type epic|task|bug --priority 1-5
+bd create "Title" --type epic|task|bug --priority 0-4
 bd show <id>
 bd update <id> --status open|in_progress|blocked|closed
 bd close <id> --reason "Done"
@@ -244,13 +251,12 @@ bd dep add <task> <blocks>    # task blocks other work
 bd ready                       # Show unblocked tasks
 bd blocked                     # Show blocked tasks
 
-# Knowledge
-bd prime                       # Load all relevant knowledge
-bd prime --keywords "auth"     # Filter by keyword
-bd prime --work-type impl      # Filter by work type
+# bd workflow context (use metaswarm's /prime for the fact store)
+bd prime                       # Print bd workflow context and bd memories
 
 # Sync
-bd sync                        # Sync with git
+bd dolt pull                   # If a Dolt remote is configured (local-only: no sync needed)
+bd dolt push                   # If a Dolt remote is configured (local-only: no sync needed)
 bd export                      # Export to JSONL
 ```
 
@@ -325,7 +331,7 @@ Edit `.coverage-thresholds.json` to set your thresholds and coverage command:
 | `thresholds.branches` | Minimum branch coverage percentage |
 | `thresholds.functions` | Minimum function coverage percentage |
 | `thresholds.statements` | Minimum statement coverage percentage |
-| `enforcement.command` | Shell command to run coverage (e.g., `pytest --cov`, `cargo tarpaulin`, `go test -cover`) |
+| `enforcement.command` | Shell command to run coverage (e.g., `pytest --cov --cov-fail-under=100`, `cargo tarpaulin --fail-under 100`, or for Go `go run .metaswarm/go-coverage-gate.go`; `go test -cover` alone never fails) |
 | `enforcement.blockPRCreation` | If `true`, agents cannot create a PR until all thresholds pass |
 | `enforcement.blockTaskCompletion` | If `true`, agents cannot mark a task complete until all thresholds pass |
 
@@ -375,13 +381,16 @@ Quality standards used by review agents:
 
 | Rubric | Used By | Covers |
 |---|---|---|
-| `code-review-rubric.md` | Code Review Agent (collaborative mode) | Style, patterns, error handling, testing |
-| `adversarial-review-rubric.md` | Code Review Agent (adversarial mode) | Binary PASS/FAIL spec compliance, DoD verification with evidence |
+| `code-review-rubric.md` | Adversarial Reviewer (collaborative mode) | Style, patterns, error handling, testing |
+| `adversarial-review-rubric.md` | Adversarial Reviewer (adversarial mode) | Binary PASS/FAIL spec compliance, DoD verification with evidence |
 | `architecture-rubric.md` | Architect Agent | Service design, coupling, scalability |
 | `security-review-rubric.md` | Security Auditor | OWASP Top 10, auth, data handling |
+| `ux-review-rubric.md` | UX Reviewer | User flows, component hierarchy, empty/loading/error states, integration work unit, UI-FLOWS, accessibility basics |
 | `plan-review-rubric.md` | CTO Agent | TDD readiness, completeness, alignment |
+| `plan-review-rubric-adversarial.md` | Plan Reviewer | Plan Review Gate: feasibility, completeness, scope and alignment |
 | `test-coverage-rubric.md` | Test Automator | Coverage, edge cases, mock quality |
 | `external-tool-review-rubric.md` | Cross-model adversarial reviewers | Binary PASS/FAIL for cross-model review, file:line evidence |
+| `release-engineering-rubric.md` | Release Engineer | Safe delivery from merge through production verification |
 
 ## Scripts
 
@@ -412,3 +421,5 @@ The full orchestration lifecycle:
 | 9. Closure | Knowledge Curator | Knowledge base updates |
 
 **Note**: For simple tasks without DoD items, phases 4-6 collapse into a linear implementation + code review flow. The orchestrated execution loop is only activated when the task has a written spec with enumerable DoD items.
+
+> **Removed in 0.14.0:** the old `-agent` variants of Coder, Researcher and Code Review, deprecated in 0.13.0. Use `coder`, `researcher` and `adversarial-reviewer`.

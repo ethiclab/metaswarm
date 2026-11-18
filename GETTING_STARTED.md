@@ -117,7 +117,7 @@ Set human checkpoints after the database schema and after the AI
 integration. When all work units pass, create a PR.
 ```
 
-That's it. The orchestrator takes over:
+That's it. The orchestrator takes over (full orchestration: the Design Review Gate reviews the plan):
 
 1. **Research** — Scans your project, notes the tech stack from your prompt
 2. **Plan** — Architect agent creates an implementation plan with work units
@@ -198,15 +198,18 @@ for events, with retry logic, signature verification, and a delivery log UI.
 
 Pick something with real complexity — a new subsystem, a permissions layer, a reporting pipeline. Something that touches multiple files and needs real architecture. Then watch what happens.
 
-This triggers the full pipeline:
+This triggers the `/start-task` pipeline:
 1. **Prime** — Loads relevant knowledge for the task
-2. **Research** — Explores your codebase for related patterns
-3. **Plan** — Creates an implementation plan
-4. **Plan Review Gate** — 3 adversarial reviewers validate the plan (Feasibility, Completeness, Scope & Alignment)
-5. **Design Review** (if complex) — Runs the 6-agent Design Review Gate
-6. **Implement** — TDD implementation
-7. **Review** — Code review + security audit
-8. **PR** — Creates PR with auto-shepherd
+2. **Assess** — Sizes the task and picks the process
+3. **Brainstorm** (if the problem is unclear) — Refines the idea into a design
+4. **Design Review Gate** (project-sized design doc only) — 6 agents review the design doc before any plan is written
+5. **Plan** — Creates an implementation plan
+6. **Plan Review Gate** — 3 adversarial reviewers validate the plan (Feasibility, Completeness, Scope & Alignment) before it is presented
+7. **Implement** — You choose the execution method, then TDD implementation
+8. **Review** — Code review + security audit
+9. **PR** — Creates PR with auto-shepherd
+
+The full orchestration workflow (above) runs the gates the other way round: there is no design doc, so the Design Review Gate reviews the plan after the Plan Review Gate. See `guides/workflow-enforcement.md`.
 
 ### Optional: BEADS Issue Tracking
 
@@ -236,7 +239,7 @@ bd ready
 
 **Team Mode**: If multiple Claude Code sessions are active on the same repository, metaswarm automatically detects this and enables Team Mode with persistent teammates and direct inter-agent messaging. No configuration needed — see `guides/agent-coordination.md` for details.
 
-**Development Guides**: The `guides/` directory contains 6 reference guides covering coding standards, testing patterns, git workflow, worktree development, build validation, and agent coordination. Agents load these automatically when relevant.
+**Development Guides**: The `guides/` directory contains 8 reference guides covering coding standards, testing patterns, git workflow, worktree development, build validation, agent coordination, delivery scope (the review severity rule), and workflow enforcement. Agents load these automatically when relevant.
 
 ## Step 4: Try the Design Review Gate
 
@@ -254,7 +257,7 @@ Six agents review in parallel:
 - **UX Reviewer**: Verifies user flows, integration work units, and component wiring
 - **CTO**: TDD readiness and alignment
 
-Each produces an APPROVE/REVISE verdict. All six must approve, or the plan iterates (max 3 rounds before human escalation).
+Each produces an APPROVE/REVISE verdict. All six must approve, or the plan iterates under the severity rule: only `blocker: yes` findings trigger another round, with a cap of 10 rounds before human escalation. If a blocker needs your answer or the reviews stop converging, the gate stops earlier and asks you to clarify the requirement.
 
 ## Step 4.5: Orchestrated Execution (for Complex Tasks)
 
@@ -287,10 +290,10 @@ Before any task, prime your agent with relevant context:
 > /prime
 ```
 
-Or with specific filters:
+Or with specific filters (keyword, file, work type):
 
-```bash
-bd prime --files "src/api/**/*.ts" --keywords "authentication" --work-type implementation
+```text
+> /prime authentication src/api/ implementation
 ```
 
 This outputs prioritized knowledge:
@@ -355,6 +358,10 @@ Brief description of the agent's specialty.
 ## Output Format
 Description of expected deliverables.
 ```
+
+### Choosing Models Per Phase
+
+Each phase (researcher, planner, coder, design/plan/adversarial reviewers, and so on) runs as its own agent type with a default model. To change one, edit `.metaswarm/models.yaml` and run `/update` to regenerate `.claude/agents/metaswarm-<role>.md`; restart Claude Code the first time `.claude/agents/` is created. Run `metaswarm-usage` (it ships in the plugin's `bin/`, which Claude Code puts on PATH; from the prompt type `! metaswarm-usage`) to see which subagents ran on which model and what they cost. See [README.md § Per-phase models](README.md#per-phase-models) for the defaults.
 
 ### Adding Rubrics
 

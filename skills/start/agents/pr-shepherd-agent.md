@@ -1,9 +1,15 @@
+---
+name: pr-shepherd-agent
+description: "PR lifecycle management through to merge. Use to monitor CI, review comments and thread resolution on a PR."
+model: sonnet
+---
+
 # PR Shepherd Agent
 
 **Type**: `pr-shepherd-agent`
 **Role**: PR lifecycle management through to merge
 **Spawned By**: Issue Orchestrator
-**Tools**: GitHub CLI, your-project:pr-shepherd skill, BEADS CLI
+**Tools**: GitHub CLI, metaswarm:pr-shepherd skill, BEADS CLI
 
 ---
 
@@ -15,9 +21,9 @@ The PR Shepherd Agent monitors a PR from creation through merge. It handles CI f
 
 ## Important
 
-This agent leverages the existing `your-project:pr-shepherd` skill for the core PR monitoring logic. It adds BEADS integration for task tracking.
+This agent leverages the existing `metaswarm:pr-shepherd` skill for the core PR monitoring logic. It adds BEADS integration for task tracking.
 
-**See**: the `metaswarm:pr-shepherd` skill for detailed PR monitoring behavior.
+**See**: the `metaswarm:pr-shepherd` skill (`skills/pr-shepherd/SKILL.md` in the metaswarm plugin) for detailed PR monitoring behavior.
 
 ---
 
@@ -47,8 +53,8 @@ Triggered when:
 
 **BEFORE any other work**, prime your context:
 
-```bash
-bd prime --work-type review --keywords "pr" "review" "ci"
+```text
+`/prime` (metaswarm knowledge priming) for review work on "pr" "review" "ci"
 ```
 
 Review the output for PR handling patterns and gotchas.
@@ -125,7 +131,6 @@ When PR is ready to merge:
 
 ```bash
 # All checks passing, all threads resolved
-bd update <task-id> --status completed
 bd close <task-id> --reason "PR #${PR_NUMBER} ready to merge. All CI green, all threads resolved."
 
 # Notify Issue Orchestrator
@@ -156,17 +161,17 @@ bd close <task-id> --reason "PR #${PR_NUMBER} ready to merge. All CI green, all 
 
 ---
 
-## Integration with your-project:pr-shepherd
+## Integration with metaswarm:pr-shepherd
 
 The existing PR Shepherd skill handles:
 
 | Responsibility             | Handled By                     |
 | -------------------------- | ------------------------------ |
-| CI monitoring              | your-project:pr-shepherd          |
-| Auto-fixing lint/types     | your-project:pr-shepherd          |
-| Review comment handling    | your-project:handling-pr-comments |
-| Thread resolution          | your-project:handling-pr-comments |
-| User prompts for decisions | your-project:pr-shepherd          |
+| CI monitoring              | metaswarm:pr-shepherd             |
+| Auto-fixing lint/types     | metaswarm:pr-shepherd             |
+| Review comment handling    | metaswarm:handling-pr-comments    |
+| Thread resolution          | metaswarm:handling-pr-comments    |
+| User prompts for decisions | metaswarm:pr-shepherd             |
 
 This BEADS agent adds:
 

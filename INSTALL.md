@@ -79,6 +79,7 @@ npx metaswarm setup
 
 1. **One of**: Claude Code, Gemini CLI, Codex CLI, or OpenCode
 2. **BEADS CLI** (`bd`) — Git-native issue tracking (recommended)
+   Minimum versions: bd ≥ 1.0.4 (tested with 1.3.4); the beads plugin version matching your bd; Dolt ≥ 2.4.0 only for server mode (`bd init --server`).
    ```bash
    curl -sSL https://raw.githubusercontent.com/steveyegge/beads/main/scripts/install.sh | bash
    ```
@@ -87,32 +88,39 @@ npx metaswarm setup
    brew install gh   # macOS
    gh auth login
    ```
-4. **Superpowers Plugin** (optional, Claude Code and Codex) — See [External Dependencies](#external-dependencies)
+4. **Superpowers Plugin** (optional, Claude Code and Codex; superpowers ≥ 6.4.1, tested with 7.0.2) — See [External Dependencies](#external-dependencies)
 5. **GTG CLI** (`gtg`) — For the fastest PR readiness checks in `pr-shepherd`
 
 ## External Dependencies
 
 metaswarm's skills reference external skills from the [superpowers](https://github.com/obra/superpowers) plugin. Superpowers is available for Claude Code and as a Codex plugin.
 
+Requires superpowers **6.4.1 or later** (tested with **7.0.2**). For how metaswarm's gates map onto each superpowers version, see [guides/workflow-enforcement.md](guides/workflow-enforcement.md).
+
 | Skill | Used By | Purpose |
 |---|---|---|
-| `superpowers:brainstorming` | Design Review Gate, Brainstorming Extension | Collaborative design ideation before implementation |
-| `superpowers:test-driven-development` | PR Shepherd, Coder Agent | RED-GREEN-REFACTOR implementation cycle |
+| `superpowers:brainstorming` | Brainstorming Extension, Design Review Gate, `/brainstorm`, `/start-task`, `/review-design` | Collaborative design ideation before implementation |
+| `superpowers:writing-plans` | Plan Review Gate (intercepts before it presents the plan), Design Review Gate | Detailed implementation plan generation |
+| `superpowers:executing-plans` | Execution Method Choice (option 3, Native inline execution), Before Finishing a Development Branch | Inline execution of a plan in the current session, then one fresh whole-branch review |
+| `superpowers:subagent-driven-development` | Execution Method Choice (option 2), Before Finishing a Development Branch | Per-task subagent execution with review between tasks |
+| `superpowers:finishing-a-development-branch` | Before Finishing a Development Branch (workflow enforcement) | Merge/PR decision once implementation is complete |
+| `superpowers:test-driven-development` | PR Shepherd, After Standalone TDD and Coverage Source of Truth (workflow enforcement) | RED-GREEN-REFACTOR implementation cycle |
 | `superpowers:systematic-debugging` | PR Shepherd | Four-phase bug investigation framework |
-| `superpowers:writing-plans` | Design Review Gate, Brainstorming Extension | Detailed implementation plan generation |
 | `superpowers:using-git-worktrees` | Design Review Gate | Isolated workspace creation for parallel dev |
+| `superpowers:verification-before-completion` | Coverage Source of Truth (workflow enforcement) | Evidence-before-claims check, including the coverage thresholds |
 
 **Install superpowers** (follow their README and marketplace docs for current instructions):
 ```bash
 # See: https://github.com/obra/superpowers
-claude plugin add obra/superpowers
+# Claude Code (superpowers is in the official marketplace):
+claude plugin install superpowers@claude-plugins-official
 
 # Codex: install from the claude-plugins-official marketplace in /plugins
 ```
 
 **Without superpowers**: metaswarm still works — the core orchestration (agents, BEADS, review gates, rubrics) is self-contained. The superpowers references are in skill trigger chains and can be removed or replaced with your own equivalents.
 
-**BEADS and GTG**: metaswarm does not auto-install runtime CLIs. Install `bd` for BEADS issue tracking and knowledge priming, and install `gtg` for consolidated PR readiness checks. The standalone Beads plugin is optional; metaswarm detects it and defers priming when present.
+**BEADS and GTG**: metaswarm does not auto-install runtime CLIs. Install `bd` for BEADS issue tracking, and install `gtg` for consolidated PR readiness checks. The standalone Beads plugin is optional; when present, it runs `bd prime` (bd workflow context) itself and metaswarm's session hook skips its own `bd prime` call. Knowledge priming is metaswarm's own `/prime` command, which reads `.beads/knowledge/` directly.
 
 ## Optional: External AI Tools
 
@@ -156,7 +164,7 @@ This is the most common upgrade path. Your project has metaswarm files in `.clau
 
 3. **Verify the migration:**
    ```text
-   /status
+   /metaswarm:status
    ```
 
 4. **Review and commit** the cleanup when you're satisfied.
@@ -185,12 +193,12 @@ This checks for new versions, shows what changed, and updates all component file
 
 ### Automatic legacy detection
 
-If you skip the manual migration, the session-start hook will detect the old npm installation when you open Claude Code and prompt you to run `/migrate`. You can also run `/status` at any time to check for legacy files.
+If you skip the manual migration, the session-start hook will detect the old npm installation when you open Claude Code and prompt you to run `/migrate`. You can also run `/metaswarm:status` at any time to check for legacy files.
 
 ## Check Installation Status
 
 ```text
-/status
+/metaswarm:status
 ```
 
 This runs platform-aware diagnostic checks: plugin version, project setup, platform install state, command shims where applicable, legacy install detection, BEADS plugin, bd CLI, gtg CLI, external tools, coverage thresholds, and Node.js.
@@ -209,7 +217,7 @@ npx metaswarm detect        # Show which CLIs are available
 
 After installation, the `/setup` command handles most customization automatically. For manual customization:
 
-### Agent Commands (in `agents/coder-agent.md`)
+### Agent Commands (in `agents/coder.md`)
 
 | Placeholder | Example: TypeScript | Example: Python | Example: Rust |
 |---|---|---|---|
@@ -237,7 +245,7 @@ After installation, the `/setup` command handles most customization automaticall
 }
 ```
 
-Set `enforcement.command` to your project's coverage command (e.g., `pytest --cov`, `cargo tarpaulin`, `go test -cover`). When this file exists, agents must pass all thresholds before pushing or creating PRs.
+Set `enforcement.command` to your project's coverage command (e.g., `pytest --cov --cov-fail-under=100`, `cargo tarpaulin --fail-under 100`, or for Go `go run .metaswarm/go-coverage-gate.go`, since `go test -cover` never fails). When this file exists, agents must pass all thresholds before pushing or creating PRs.
 
 ## Verify Installation
 
@@ -245,10 +253,10 @@ Set `enforcement.command` to your project's coverage command (e.g., `pytest --co
 # Check BEADS is working
 bd status
 
-# Check knowledge base
+# Check bd workflow context
 bd prime
 
-# In Claude Code, verify commands are available
+# In Claude Code, verify commands are available (run /prime to check the knowledge base)
 # Type / and you should see start-task, review-design, etc.
 ```
 

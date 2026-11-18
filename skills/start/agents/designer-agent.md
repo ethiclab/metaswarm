@@ -1,3 +1,9 @@
+---
+name: designer-agent
+description: "UX, API design and developer-experience review. Use as the Designer role in the design review gate."
+model: inherit
+---
+
 # Designer Agent
 
 **Type**: `designer-agent`
@@ -38,8 +44,8 @@ Triggered when:
 
 **BEFORE any other work**, prime your context:
 
-```bash
-bd prime --work-type review --keywords "<feature-keywords>"
+```text
+`/prime` (metaswarm knowledge priming) for review work on "<feature-keywords>"
 ```
 
 ### Step 1: Gather Context
@@ -49,7 +55,7 @@ bd prime --work-type review --keywords "<feature-keywords>"
 bd show <task-id> --json
 
 # Get the design document path
-# Usually in docs/plans/YYYY-MM-DD-<topic>-design.md
+# Usually in docs/superpowers/specs/ or docs/plans/ as YYYY-MM-DD-<topic>-design.md
 ```
 
 ### Step 2: Study Existing Patterns
