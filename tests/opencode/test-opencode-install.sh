@@ -372,6 +372,34 @@ has "$(git -C "$CL" rev-parse --short HEAD)" && pass "prints the new short commi
 [ -L "$OC/skills/start" ] && [ -L "$OC/commands/status.md" ] && [ -L "$OC/commands/start-task.md" ] && [ -f "$OC/agents/$A1" ] && [ -L "$OC/plugins/metaswarm-session.js" ] && [ -f "$OC/opencode.json" ] && pass "everything else is intact" || fail "update removed too much"
 [ "$(readlink "$OC/skills/my-own")" = "$TMP_BASE/e$N" ] && pass "user symlink survives the update" || fail "user symlink survives the update"
 ! has '"instructions"' && pass "update prints no config snippet" || fail "update printed a config snippet"
+# a ref without OpenCode support: refused before the checkout, so the clone does not move
+(cd "$WORK" && $G checkout -q -b nolib && $G rm -q -r .opencode/lib && $G commit -q -m "no opencode lib" && $G push -q "$BARE" nolib && $G checkout -q distro) >/dev/null 2>&1 || fail "could not push the branch without .opencode/lib"
+installed="$(snap "$OC")"
+REF="nolib"; inst; REF="distro"
+[ "$RC" != "0" ] && [ "$RC" != "64" ] && pass "ref without OpenCode support: non-zero exit" || fail "ref without OpenCode support: rc=$RC"
+[ "$(git -C "$CL" rev-parse HEAD)" = "$C2" ] && [ -f "$CL/.opencode/lib/generate-agents.sh" ] && [ -z "$(git -C "$CL" status --porcelain)" ] && pass "ref without OpenCode support: clone HEAD and files unchanged" || fail "ref without OpenCode support moved the clone: $(git -C "$CL" rev-parse HEAD 2>&1 | head -1)"
+[ "$(snap "$OC")" = "$installed" ] && pass "ref without OpenCode support: links and agents unchanged" || fail "ref without OpenCode support changed the install"
+has "nolib" && has "no OpenCode support" && pass "ref without OpenCode support: error names the ref" || fail "ref without OpenCode support: $(printf '%s' "$OUT" | tail -2 | tr '\n' ' ')"
+# a ref that has the generator but lacks one of the directories is refused the same way
+(cd "$WORK" && $G checkout -q -b noagents && $G rm -q -r agents && $G commit -q -m "no agents" && $G push -q "$BARE" noagents && $G checkout -q distro) >/dev/null 2>&1 || fail "could not push the branch without agents/"
+REF="noagents"; inst; REF="distro"
+[ "$RC" != "0" ] && [ "$RC" != "64" ] && [ "$(git -C "$CL" rev-parse HEAD)" = "$C2" ] && [ -d "$CL/agents" ] && [ "$(snap "$OC")" = "$installed" ] && pass "ref without agents/: non-zero exit, clone and install unchanged" || fail "ref without agents/: rc=$RC HEAD=$(git -C "$CL" rev-parse HEAD 2>&1 | head -1)"
+# the update hint names METASWARM_REF only for a ref that is not the default
+inst
+has "METASWARM_REF=distro" && pass "update hint names a non-default ref" || fail "update hint lacks METASWARM_REF=distro"
+(cd "$WORK" && $G push -q "$BARE" distro:opencode) >/dev/null 2>&1 || fail "could not push the default branch name"
+REF="opencode"; inst; REF="distro"
+[ "$RC" = "0" ] && has "To update, run this installer again" && ! has "METASWARM_REF=" && pass "update hint for the default ref has no METASWARM_REF" || fail "default-ref hint: rc=$RC $(printf '%s' "$OUT" | grep 'To update' | head -1)"
+inst
+installed="$(snap "$OC")"
+# first install of a ref without OpenCode support: the clone is made, nothing is linked, the message says so
+KEEP_OC="$OC"; KEEP_N="$N"
+new_env; REF="nolib"; inst; REF="distro"
+[ "$RC" != "0" ] && [ "$RC" != "64" ] && [ ! -e "$OC/skills" ] && [ ! -e "$OC/commands" ] && [ ! -e "$OC/agents" ] && [ ! -e "$OC/opencode.json" ] && pass "first install of a ref without OpenCode support: non-zero exit, nothing linked or written" || fail "first install of an unsupported ref: rc=$RC"
+[ -d "$OC/metaswarm/.git" ] && has "$OC/metaswarm" && has "METASWARM_REF" && ! has "left as it was" && pass "first install of an unsupported ref: says the clone exists and how to go on" || fail "first install of an unsupported ref: $(printf '%s' "$OUT" | tail -2 | tr '\n' ' ')"
+inst
+[ "$RC" = "0" ] && [ "$(git -C "$OC/metaswarm" rev-parse HEAD)" = "$C2" ] && [ -L "$OC/skills/start" ] && pass "running again with a supported ref completes that install" || fail "re-run after an unsupported first install: rc=$RC"
+OC="$KEEP_OC"; H="$TMP_BASE/e$KEEP_N/home"; X="$TMP_BASE/e$KEEP_N/xdg"   # back to the install under test
 # documented removal of the links
 (cd "$CWD" && find "$OC/skills" "$OC/commands" "$OC/plugins" -maxdepth 1 -type l -lname "$OC/metaswarm/*" -delete)
 [ "$(names "$OC/skills")" = "my-own" ] && [ -z "$(names "$OC/commands")" ] && [ -z "$(names "$OC/plugins")" ] && pass "documented find -lname removal deletes exactly the metaswarm links" || fail "documented removal: $(names "$OC/skills" | tr '\n' ' ')"

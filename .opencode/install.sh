@@ -88,7 +88,7 @@ is_checkout() {
 # update_clone <clone> <url> <ref>: returns non-zero, with git's own message shown,
 # when the clone could not be brought to <ref>. Removes nothing.
 update_clone() {
-  local clone="$1" url="$2" ref="$3" origin
+  local clone="$1" url="$2" ref="$3" origin need
   command -v git >/dev/null 2>&1 || { err "git is required"; return 1; }
   if [ -e "$clone" ] || [ -L "$clone" ]; then
     if [ ! -e "$clone/.git" ] || ! git -C "$clone" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
@@ -101,6 +101,10 @@ update_clone() {
     fi
     say "Updating $clone ..."
     git -C "$clone" fetch origin "$ref" </dev/null || { err "git fetch of '$ref' failed; the install was left as it was"; return 1; }
+    # Checked before the checkout, so a ref that cannot be installed does not move the clone.
+    for need in skills commands agents .opencode/lib/generate-agents.sh; do
+      git -C "$clone" cat-file -e "FETCH_HEAD:$need" 2>/dev/null || { err "'$ref' has no OpenCode support (no $need); the install was left as it was"; return 1; }
+    done
     git -C "$clone" checkout --quiet --detach FETCH_HEAD </dev/null || { err "git checkout failed (see above); the install was left as it was"; return 1; }
   else
     say "Cloning $url ..."
@@ -244,7 +248,7 @@ configure() {
 # --- Install ---
 
 install() {
-  local from="$1" oc clone phys url ref agents_rc=0
+  local from="$1" oc clone phys url ref agents_rc=0 fresh=0
   oc="$(oc_dir)" || exit 1
   url="${METASWARM_REPO_URL:-$DEFAULT_REPO_URL}"
   ref="${METASWARM_REF:-$DEFAULT_REF}"
@@ -260,8 +264,13 @@ install() {
     say "Using the local checkout from --from: $clone (git is not run)"
   else
     clone="$oc/metaswarm"
+    if [ ! -e "$clone" ] && [ ! -L "$clone" ]; then fresh=1; fi
     update_clone "$clone" "$url" "$ref" || exit 1
-    is_checkout "$clone" || die "$clone at '$ref' has no OpenCode support (needs skills/, commands/, agents/ and .opencode/lib/generate-agents.sh); the install was left as it was"
+    if ! is_checkout "$clone"; then
+      # An existing clone was checked before its checkout, so this is a first clone.
+      [ "$fresh" = 1 ] || die "$clone at '$ref' has no OpenCode support (needs skills/, commands/, agents/ and .opencode/lib/generate-agents.sh)"
+      die "'$ref' has no OpenCode support (needs skills/, commands/, agents/ and .opencode/lib/generate-agents.sh). It was cloned to $clone, and nothing else was installed. Run the installer again with METASWARM_REF set to a ref that supports OpenCode."
+    fi
   fi
   phys="$(phys_dir "$clone")" || die "cannot read $clone"
   say "OpenCode directory: $oc"
@@ -300,7 +309,11 @@ install() {
   fi
   say "Done! Restart OpenCode, then run /setup in a project to configure it."
   if [ -z "$from" ]; then
-    say "To update, run this installer again (with METASWARM_REF=$ref if that is not the default)."
+    if [ "$ref" = "$DEFAULT_REF" ]; then
+      say "To update, run this installer again."
+    else
+      say "To update, run this installer again with METASWARM_REF=$ref (it is not remembered)."
+    fi
   fi
   echo ""
 }
