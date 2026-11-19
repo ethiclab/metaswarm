@@ -1,0 +1,10 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "instructions": [".opencode/OPENCODE.md"],
+  "command": {
+    "prime": { "template": "{file:.opencode/commands/prime.md}", "description": "old copy" }
+  },
+  "agent": {
+    "architect-agent": { "mode": "subagent", "prompt": "{file:.opencode/agents/architect-agent.md}" }
+  }
+}

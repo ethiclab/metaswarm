@@ -79,6 +79,6 @@ Spawn sites name a phase role through `roleType` (`guides/agent-coordination.md`
 | OpenCode | `@mention` of `.opencode/agents/<role>.md` (written by `metaswarm-agents.sh generate --host opencode` for roles that set `roles.<role>.opencode`) | `model` key in the agent file, from `.metaswarm/models.yaml` `roles.<role>.opencode`; else the invoking agent's model |
 | Cursor | `.cursor/agents/` (also reads `.claude/agents/`) | `model` frontmatter, default `inherit` |
 
-See each host's reference file (`codex-tools.md`, `opencode-tools.md`, `cursor-tools.md`, and `GEMINI.md` at the repo root) for sources and what is unverified.
+See each host's reference file (`codex-tools.md`, `opencode-tools.md`, `cursor-tools.md`, and `GEMINI.md` at the repo root) for sources and what is unverified. To install metaswarm on OpenCode, see [`docs/README.opencode.md`](../../../docs/README.opencode.md).
 
 **Fallback:** on a host with no per-role model configured, pass the role name through to the host's generic spawn (Codex `spawn_agent`, an OpenCode `@mention`, a Cursor or Gemini subagent) with the role's `agents/<role>.md` as the instructions. The host's default model applies, so the Claude model defaults are not enforced. `.metaswarm/models.yaml` `roles.<role>.codex` and `roles.<role>.gemini` are used by the external-tools adapters when Claude is the host, not to configure these hosts. `roles.<role>.opencode` is the exception: `metaswarm-agents.sh generate --host opencode` turns it into `.opencode/agents/<role>.md`, which sets that role's model on OpenCode.
