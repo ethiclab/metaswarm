@@ -1,0 +1,23 @@
+# metaswarm models v1 — test fixture: models.yaml plus opencode keys
+# (opencode set for coder and adversarial-reviewer only)
+roles:
+  design-reviewer:
+    claude: opus
+    codex: gpt-5.3-codex
+    gemini: pro
+  plan-reviewer:
+    claude: claude-opus-4-5
+  coder:
+    claude: haiku
+    opencode: anthropic/claude-sonnet-4-5
+  adversarial-reviewer:
+    claude: opus
+    opencode: openai/gpt-5.1
+  pr-shepherd-agent:
+    claude: sonnet
+  knowledge-curator-agent:
+    claude: sonnet
+escalation:
+  coder:
+    after_failures: 2
+    claude: opus

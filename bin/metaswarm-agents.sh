@@ -5,6 +5,9 @@
 #   metaswarm-agents.sh check                report hand-edited, stale, orphan, missing files
 #   metaswarm-agents.sh clean                remove generated files (header-bearing only)
 #
+# With --host opencode, generate/check/clean target .opencode/agents/<role>.md instead,
+# written only for roles that set roles.<role>.opencode in models.yaml.
+#
 # Can be sourced: resolve_role_model <role> <host> prints the configured model.
 # Bash 3.2 compatible (no associative arrays, no mapfile).
 
@@ -37,6 +40,7 @@ init_env() {
   MS_PROJECT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
   MS_CONFIG="$MS_PROJECT/.metaswarm/models.yaml"
   MS_AGENTS="$MS_PROJECT/.claude/agents"
+  MS_OC_AGENTS="$MS_PROJECT/.opencode/agents"
   MS_VERSION="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$MS_PLUGIN/.claude-plugin/plugin.json" | head -1)"
 }
 
@@ -97,6 +101,9 @@ parse_models() {
             esac ;;
           codex|gemini)
             [ "$section" = roles ] || parse_error "$n" "unknown key '$key' under escalation" ;;
+          opencode)
+            [ "$section" = roles ] || parse_error "$n" "unknown key '$key' under escalation"
+            printf '%s' "$val" | grep -Eq '^[A-Za-z0-9._-]+/[^[:space:]]+$' || parse_error "$n" "invalid opencode model '$val' (expected provider/model-id)" ;;
           after_failures)
             [ "$section" = escalation ] || parse_error "$n" "unknown host key '$key'"
             printf '%s' "$val" | grep -Eq '^[0-9]+$' || parse_error "$n" "after_failures must be an integer" ;;
@@ -115,7 +122,8 @@ cfg_get() { printf '%s' "$MS_CFG" | sed -n "s/^$1=//p" | head -1; }
 plugin_field() { sed -n "s/^$2: //p" "$MS_PLUGIN/agents/$1.md" | head -1; }
 
 # resolve_role_model <role> <host>: configured model, else the plugin default
-# (agents/<role>.md frontmatter for claude; empty for codex/gemini = adapter built-in).
+# (agents/<role>.md frontmatter for claude; empty for codex/gemini = adapter built-in,
+# and for opencode = the invoking agent's model).
 resolve_role_model() {
   local m
   init_env
@@ -151,6 +159,143 @@ header_field() { sed -n "s/^<!-- generated-by: metaswarm v\([^ ]*\) sha256:\([0-
 strip_header() { awk '!d && /^<!-- generated-by: metaswarm /{d=1;next}1' "$1"; }
 is_hand_edited() { [ "$(strip_header "$1" | sha)" != "$(header_field "$1" 2)" ]; }
 role_of() { local b; b="$(basename "$1" .md)"; echo "${b#metaswarm-}"; }
+
+# --- OpenCode target (.opencode/agents/<role>.md) ---
+# OpenCode reads a different frontmatter (no name, mode: subagent, provider/model-id,
+# permission block), so these files are full renders rather than edits of the plugin's.
+# .opencode/agents/ is a shared namespace with bare names: only <role>.md for a roster
+# role that carries the generated-by header is ever treated as metaswarm's.
+
+# opencode_roles: roster roles that set roles.<role>.opencode
+opencode_roles() {
+  local role
+  for role in $ROLES; do
+    [ -z "$(cfg_get "roles.$role.opencode")" ] || echo "$role"
+  done
+}
+
+is_opencode_role() { [ -n "$(cfg_get "roles.$1.opencode")" ]; }
+
+# render_opencode <role>: write the full generated file to stdout
+render_opencode() {
+  local role="$1" src tmp hash
+  src="$MS_PLUGIN/agents/$role.md"
+  tmp="$(mktemp)"
+  {
+    echo "---"
+    awk '/^---$/ { if (++dashes == 2) exit; next } /^description:/ { print }' "$src"
+    echo "mode: subagent"
+    printf 'model: %s\n' "$(cfg_get "roles.$role.opencode")"
+    if awk '/^---$/ { if (++dashes == 2) exit; next } /^disallowedTools:/ { found = 1 } END { exit !found }' "$src"; then
+      printf 'permission:\n  edit: deny\n'
+    fi
+    echo "---"
+    # body = everything after the closing ---
+    awk 'c >= 2 { print } /^---$/ { c++ }' "$src"
+  } > "$tmp"
+  hash="$(sha < "$tmp")"
+  awk -v h="<!-- generated-by: metaswarm v$MS_VERSION sha256:$hash — edit .metaswarm/models.yaml, not this file -->" \
+    '{ print } /^---$/ { c++; if (c == 2) print h }' "$tmp"
+  rm -f "$tmp"
+}
+
+cmd_generate_opencode() {
+  local force="${1:-0}" role roles f tmp problems=0
+  if [ ! -f "$MS_CONFIG" ]; then
+    echo "no models.yaml — no OpenCode agents to generate; run /setup to customize"
+    return 0
+  fi
+  parse_models
+  roles="$(opencode_roles)"
+  # Refuse before writing anything if a target is user-authored or hand-edited
+  for role in $roles; do
+    f="$MS_OC_AGENTS/$role.md"
+    [ -f "$f" ] || continue
+    if ! has_header "$f"; then
+      echo "refusing to overwrite user-authored file (no generated-by header): $f" >&2; problems=1
+    elif [ "$force" -eq 0 ] && is_hand_edited "$f"; then
+      echo "hand-edited (use --force to overwrite): $f" >&2; problems=1
+    fi
+  done
+  # ... or if a generated file whose role is no longer configured was hand-edited
+  for role in $ROLES; do
+    f="$MS_OC_AGENTS/$role.md"
+    is_opencode_role "$role" && continue
+    [ -f "$f" ] && has_header "$f" || continue
+    if [ "$force" -eq 0 ] && is_hand_edited "$f"; then
+      echo "hand-edited (use --force to remove; roles.$role.opencode is no longer set): $f" >&2; problems=1
+    fi
+  done
+  [ "$problems" -eq 0 ] || return 1
+  if [ -z "$roles" ]; then
+    echo "no roles.<role>.opencode in models.yaml — no OpenCode agents to generate"
+  else
+    mkdir -p "$MS_OC_AGENTS"
+  fi
+  for role in $roles; do
+    tmp="$(mktemp)"
+    render_opencode "$role" > "$tmp"
+    mv "$tmp" "$MS_OC_AGENTS/$role.md"
+    echo "wrote $MS_OC_AGENTS/$role.md"
+  done
+  for role in $ROLES; do
+    f="$MS_OC_AGENTS/$role.md"
+    is_opencode_role "$role" && continue
+    [ -f "$f" ] && has_header "$f" || continue
+    rm -f "$f"
+    echo "removed orphan $f"
+  done
+}
+
+cmd_check_opencode() {
+  local role f drift=0 tmp
+  if [ ! -f "$MS_CONFIG" ]; then
+    for role in $ROLES; do
+      f="$MS_OC_AGENTS/$role.md"
+      [ -f "$f" ] && has_header "$f" || continue
+      echo "leftover generated agent (no models.yaml; it still overrides the role's model on OpenCode): $f"; drift=1
+    done
+    if [ "$drift" -ne 0 ]; then
+      echo "restore .metaswarm/models.yaml and run generate --host opencode, or run: metaswarm-agents.sh clean --host opencode"
+      return 1
+    fi
+    echo "no models.yaml — no OpenCode agents to generate; run /setup to customize"
+    return 0
+  fi
+  parse_models
+  for role in $(opencode_roles); do
+    f="$MS_OC_AGENTS/$role.md"
+    if [ ! -f "$f" ]; then
+      echo "missing: $f"; drift=1
+    elif ! has_header "$f"; then
+      echo "conflict (user-authored file blocks generation): $f"; drift=1
+    elif is_hand_edited "$f"; then
+      echo "hand-edited: $f"; drift=1
+    else
+      tmp="$(mktemp)"; render_opencode "$role" > "$tmp"
+      cmp -s "$tmp" "$f" || { echo "stale: $f"; drift=1; }
+      rm -f "$tmp"
+    fi
+  done
+  for role in $ROLES; do
+    f="$MS_OC_AGENTS/$role.md"
+    is_opencode_role "$role" && continue
+    [ -f "$f" ] && has_header "$f" || continue
+    echo "orphan: $f"; drift=1
+  done
+  [ "$drift" -eq 0 ] || return 1
+  echo "generated OpenCode agents are up to date"
+}
+
+cmd_clean_opencode() {
+  local role f
+  for role in $ROLES; do
+    f="$MS_OC_AGENTS/$role.md"
+    [ -f "$f" ] && has_header "$f" || continue
+    rm -f "$f"
+    echo "removed $f"
+  done
+}
 
 # --- Subcommands ---
 
@@ -234,16 +379,45 @@ cmd_clean() {
   done
 }
 
+usage() {
+  echo "usage: metaswarm-agents.sh generate [--host opencode] [--force] | check [--host opencode] | clean [--host opencode] | resolve <role> [claude|codex|gemini|opencode]" >&2
+  exit 64
+}
+
 main() {
+  local cmd="${1:-}" arg has_host=0 host="" force=0
   init_env
-  case "${1:-}" in
-    generate) cmd_generate "${2:-}" ;;
-    check) cmd_check ;;
-    clean) cmd_clean ;;
+  case "$cmd" in
+    generate|check|clean)
+      for arg in "$@"; do [ "$arg" = "--host" ] && has_host=1; done
+      if [ "$has_host" -eq 0 ]; then
+        # No --host: the Claude target, exactly as before.
+        case "$cmd" in
+          generate) cmd_generate "${2:-}" ;;
+          check) cmd_check ;;
+          clean) cmd_clean ;;
+        esac
+        return
+      fi
+      shift
+      while [ $# -gt 0 ]; do
+        arg="$1"; shift
+        case "$arg" in
+          --host) [ $# -gt 0 ] && [ -z "$host" ] || usage; host="$1"; shift ;;
+          --force) [ "$cmd" = generate ] || usage; force=1 ;;
+          *) usage ;;
+        esac
+      done
+      [ "$host" = opencode ] || usage
+      case "$cmd" in
+        generate) cmd_generate_opencode "$force" ;;
+        check) cmd_check_opencode ;;
+        clean) cmd_clean_opencode ;;
+      esac ;;
     resolve)
       is_role "${2:-}" || { echo "unknown role: ${2:-}" >&2; exit 2; }
       resolve_role_model "$2" "${3:-claude}" ;;
-    *) echo "usage: metaswarm-agents.sh generate [--force] | check | clean | resolve <role> [claude|codex|gemini]" >&2; exit 64 ;;
+    *) usage ;;
   esac
 }
 

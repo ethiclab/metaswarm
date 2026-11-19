@@ -239,6 +239,206 @@ run resolve coder codex
 run resolve coder gemini
 [ "$OUT" = "flash" ] && pass "aligned + quoted gemini value" || fail "aligned quoted gemini: '$OUT'"
 
+# --- OpenCode target (generate/check/clean --host opencode) ---
+OC_FIXTURE="$SCRIPT_DIR/fixtures/models-opencode.yaml"
+new_oc_proj() { new_proj none; cp "$OC_FIXTURE" "$P/.metaswarm/models.yaml"; }
+oc_file() { echo "$P/.opencode/agents/$1.md"; }
+oc_left() { ls "$P/.opencode/agents" 2>/dev/null | tr '\n' ' '; }
+# frontmatter of a file (between the first two --- lines)
+fm() { awk '/^---$/ { if (++c == 2) exit; next } c == 1 { print }' "$1"; }
+
+echo "Test 18: opencode host key parses and resolves"
+new_oc_proj
+run resolve coder opencode
+[ "$RC" = "0" ] && [ "$OUT" = "anthropic/claude-sonnet-4-5" ] && pass "resolve coder opencode" || fail "resolve coder opencode: rc=$RC '$OUT'"
+run resolve researcher opencode
+[ "$RC" = "0" ] && [ -z "$OUT" ] && pass "unset opencode role resolves empty" || fail "unset opencode role: rc=$RC '$OUT'"
+new_proj none
+printf 'escalation:\n  coder:\n    opencode: a/b\n' > "$P/.metaswarm/models.yaml"
+run resolve coder opencode
+[ "$RC" = "2" ] && has "models.yaml:3:" && pass "opencode under escalation is rejected" || fail "opencode under escalation: rc=$RC $OUT"
+
+echo "Test 19: generate --host opencode writes full renders for configured roles only"
+new_oc_proj
+run generate --host opencode
+check "generate --host opencode exits 0" "$RC"
+[ "$(oc_left)" = "adversarial-reviewer.md coder.md " ] && pass "files only for roles with an opencode value" || fail "opencode files: $(oc_left)"
+[ ! -d "$P/.claude" ] && pass "opencode generate writes nothing under .claude" || fail "opencode generate wrote .claude"
+f="$(oc_file coder)"
+[ "$(sed -n 1p "$f")" = "---" ] && pass "file starts with frontmatter" || fail "file starts with frontmatter"
+fm "$f" | grep -q '^model: anthropic/claude-sonnet-4-5$' && pass "model from roles.<role>.opencode" || fail "model from roles.<role>.opencode"
+fm "$f" | grep -q '^mode: subagent$' && pass "mode: subagent" || fail "mode: subagent"
+desc="$(sed -n 's/^description: //p' "$REPO_ROOT/agents/coder.md" | head -1)"
+fm "$f" | grep -qxF "description: $desc" && pass "description verbatim from canonical agent" || fail "description verbatim from canonical agent"
+fm "$f" | grep -q 'permission\|edit: deny' && fail "writable role has no permission block" || pass "writable role has no permission block"
+hdr="$(grep '^<!-- generated-by: metaswarm ' "$f")"
+case "$hdr" in
+  "<!-- generated-by: metaswarm v$VERSION sha256:"*" — edit .metaswarm/models.yaml, not this file -->") pass "opencode header has plugin version" ;;
+  *) fail "opencode header has plugin version: $hdr" ;;
+esac
+second_dash="$(grep -n '^---$' "$f" | sed -n '2p' | cut -d: -f1)"
+sed -n "$((second_dash + 1))p" "$f" | grep -q '^<!-- generated-by: metaswarm ' && pass "opencode header is first body line" || fail "opencode header is first body line"
+want="$(awk '!d && /^<!-- generated-by: metaswarm /{d=1;next}1' "$f" | sha)"
+case "$hdr" in *"sha256:$want "*) pass "opencode header hash covers the rest of the file" ;; *) fail "opencode header hash covers the rest of the file" ;; esac
+awk 'c >= 2 { print } /^---$/ { c++ }' "$REPO_ROOT/agents/coder.md" > "$TMP_BASE/want-body"
+sed -n "$((second_dash + 2)),\$p" "$f" > "$TMP_BASE/got-body"
+cmp -s "$TMP_BASE/want-body" "$TMP_BASE/got-body" && pass "canonical body copied verbatim" || fail "canonical body copied verbatim"
+f="$(oc_file adversarial-reviewer)"
+fm "$f" | grep -q '^model: openai/gpt-5.1$' && pass "read-only role model" || fail "read-only role model"
+[ "$(fm "$f" | grep -A1 '^permission:$' | sed -n 2p)" = "  edit: deny" ] && pass "read-only role gets permission: edit: deny" || fail "read-only role gets permission: edit: deny"
+bad=0
+for g in "$P"/.opencode/agents/*.md; do
+  fm "$g" | grep -Eq '^name:|disallowedTools|^model: (opus|sonnet|haiku|inherit)$' && bad=1
+  grep -q '^disallowedTools' "$g" && bad=1
+done
+check "no Claude-style frontmatter (name, disallowedTools, model alias)" "$bad"
+cp -R "$P/.opencode/agents" "$TMP_BASE/ocsnap$N"
+run generate --host opencode
+diff -r "$P/.opencode/agents" "$TMP_BASE/ocsnap$N" >/dev/null && pass "second opencode generate is byte-identical" || fail "second opencode generate is byte-identical"
+
+echo "Test 20: generate --host opencode without models.yaml or without opencode keys"
+new_proj none
+run generate --host opencode
+[ "$RC" = "0" ] && has "no models.yaml" && [ ! -d "$P/.opencode" ] && [ ! -d "$P/.claude" ] && pass "no models.yaml: message, no writes, exit 0" || fail "opencode no models.yaml (rc=$RC out=$OUT)"
+new_proj
+run generate --host opencode
+[ "$RC" = "0" ] && [ ! -d "$P/.opencode" ] && [ ! -d "$P/.claude" ] && pass "no opencode keys: nothing written, exit 0" || fail "opencode no keys (rc=$RC out=$OUT)"
+run check --host opencode
+check "check --host opencode with no opencode keys exits 0" "$RC"
+
+echo "Test 21: default generate/check/clean ignore opencode keys"
+new_proj
+run generate
+ref="$P/.claude/agents"
+new_oc_proj
+run generate
+check "default generate with opencode keys exits 0" "$RC"
+diff -r "$ref" "$P/.claude/agents" >/dev/null && pass "default output byte-identical with opencode keys present" || fail "default output byte-identical with opencode keys present"
+[ ! -e "$P/.opencode" ] && pass "default generate creates no .opencode" || fail "default generate creates no .opencode"
+run check
+[ "$RC" = "0" ] && [ ! -e "$P/.opencode" ] && pass "default check ignores opencode target" || fail "default check with opencode keys: rc=$RC $OUT"
+run generate --host opencode
+run clean
+[ "$(count_agents)" = "0" ] && [ "$(oc_left)" = "adversarial-reviewer.md coder.md " ] && pass "default clean leaves .opencode alone" || fail "default clean touched .opencode: $(oc_left)"
+run generate --host bogus
+[ "$RC" = "64" ] && pass "unknown --host is a usage error" || fail "unknown --host: rc=$RC $OUT"
+
+echo "Test 22: opencode refuses user-authored and hand-edited targets"
+new_oc_proj
+mkdir -p "$P/.opencode/agents"
+printf -- '---\ndescription: mine\nmode: subagent\n---\nuser coder\n' > "$(oc_file coder)"
+run generate --host opencode
+[ "$RC" = "1" ] && has ".opencode/agents/coder.md" && pass "exits 1 naming the user-authored file" || fail "opencode user-authored: rc=$RC $OUT"
+grep -q '^user coder$' "$(oc_file coder)" && [ ! -e "$(oc_file adversarial-reviewer)" ] && pass "user file untouched, nothing else written" || fail "user file untouched, nothing else written"
+run generate --host opencode --force
+[ "$RC" = "1" ] && grep -q '^user coder$' "$(oc_file coder)" && pass "untouched even with --force" || fail "opencode untouched even with --force"
+run check --host opencode
+[ "$RC" = "1" ] && has "conflict" && has ".opencode/agents/coder.md" && pass "check reports the conflict" || fail "opencode check conflict: rc=$RC $OUT"
+rm "$(oc_file coder)"
+run generate --host opencode
+echo "extra" >> "$(oc_file coder)"
+run check --host opencode
+[ "$RC" = "1" ] && has "hand-edited" && has "coder.md" && pass "check reports hand-edited" || fail "opencode hand-edited: rc=$RC $OUT"
+run generate --host opencode
+[ "$RC" = "1" ] && grep -q '^extra$' "$(oc_file coder)" && pass "generate refuses hand-edited file" || fail "opencode generate refuses hand-edited: rc=$RC $OUT"
+run generate --force --host opencode
+[ "$RC" = "0" ] && ! grep -q '^extra$' "$(oc_file coder)" && pass "--force overwrites hand-edited file" || fail "opencode --force: rc=$RC $OUT"
+
+echo "Test 23: check --host opencode reports stale, missing and orphan; generate removes orphans"
+run check --host opencode
+check "clean opencode tree exits 0" "$RC"
+sed -i.bak 's#opencode: openai/gpt-5.1#opencode: openai/gpt-5.2#' "$P/.metaswarm/models.yaml"; rm -f "$P/.metaswarm/models.yaml.bak"
+run check --host opencode
+[ "$RC" = "1" ] && has "stale" && has "adversarial-reviewer.md" && pass "config change is stale" || fail "opencode stale: rc=$RC $OUT"
+run generate --host opencode
+grep -q '^model: openai/gpt-5.2$' "$(oc_file adversarial-reviewer)" && pass "regenerate applies the new model" || fail "regenerate applies the new model"
+rm "$(oc_file coder)"
+run check --host opencode
+[ "$RC" = "1" ] && has "missing" && has "coder.md" && pass "missing detected" || fail "opencode missing: rc=$RC $OUT"
+run generate --host opencode
+# orphan: role no longer configured for opencode
+grep -v 'opencode: openai/' "$P/.metaswarm/models.yaml" > "$P/.metaswarm/m.tmp"; mv "$P/.metaswarm/m.tmp" "$P/.metaswarm/models.yaml"
+printf 'my own agent\n' > "$P/.opencode/agents/my-own.md"
+printf -- '---\ndescription: mine\n---\nuser planner\n' > "$(oc_file planner)"
+run check --host opencode
+[ "$RC" = "1" ] && has "orphan" && has "adversarial-reviewer.md" && ! has "my-own.md" && ! has "planner.md" && pass "orphan detected, user files ignored" || fail "opencode orphan: rc=$RC $OUT"
+run generate --host opencode
+[ "$RC" = "0" ] && [ "$(oc_left)" = "coder.md my-own.md planner.md " ] && pass "generate removes the orphan, keeps user files" || fail "opencode orphan removal: rc=$RC $(oc_left)"
+run check --host opencode
+check "check passes after orphan removal" "$RC"
+
+echo "Test 24: clean --host opencode removes only header-bearing files"
+run generate
+run clean --host opencode
+[ "$RC" = "0" ] && [ "$(oc_left)" = "my-own.md planner.md " ] && pass "only generated opencode files removed" || fail "opencode clean: rc=$RC $(oc_left)"
+[ "$(count_agents)" = "8" ] && pass "clean --host opencode leaves .claude/agents alone" || fail "clean --host opencode touched .claude: $(count_agents)"
+new_oc_proj
+run generate --host opencode
+rm "$P/.metaswarm/models.yaml"
+run check --host opencode
+[ "$RC" = "1" ] && has "clean --host opencode" && pass "check flags leftover opencode agents without models.yaml" || fail "opencode leftover: rc=$RC $OUT"
+
+echo "Test 25: opencode target only ever touches <roster-role>.md"
+new_oc_proj
+run generate --host opencode
+# header-bearing file with a non-role name (another tool's, or a renamed copy)
+cp "$(oc_file coder)" "$P/.opencode/agents/architect-agent.md"
+# user notes that merely quote the header prefix on a body line
+printf 'my notes\n<!-- generated-by: metaswarm v0 sha256:abc quoted in my notes -->\n' > "$P/.opencode/agents/my-notes.md"
+run check --host opencode
+[ "$RC" = "0" ] && ! has "architect-agent.md" && ! has "my-notes.md" && pass "check does not report non-role files" || fail "check reports non-role files: rc=$RC $OUT"
+run generate --host opencode
+[ "$RC" = "0" ] && [ -e "$P/.opencode/agents/architect-agent.md" ] && pass "generate keeps a header-bearing non-role file" || fail "generate removed architect-agent.md: rc=$RC $OUT"
+[ -e "$P/.opencode/agents/my-notes.md" ] && pass "generate keeps a non-role file quoting the header" || fail "generate removed my-notes.md"
+run clean --host opencode
+[ "$RC" = "0" ] && [ "$(oc_left)" = "architect-agent.md my-notes.md " ] && pass "clean removes only generated roster-role files" || fail "clean and non-role files: rc=$RC $(oc_left)"
+rm "$P/.metaswarm/models.yaml"
+run check --host opencode
+[ "$RC" = "0" ] && pass "no-models.yaml check ignores non-role files" || fail "no-models.yaml check flags non-role files: rc=$RC $OUT"
+
+echo "Test 26: a hand-edited opencode orphan is not deleted without --force"
+new_oc_proj
+run generate --host opencode
+echo "my tweak" >> "$(oc_file adversarial-reviewer)"
+grep -v 'opencode: openai/' "$P/.metaswarm/models.yaml" > "$P/.metaswarm/m.tmp"; mv "$P/.metaswarm/m.tmp" "$P/.metaswarm/models.yaml"
+sed -i.bak 's#opencode: anthropic/claude-sonnet-4-5#opencode: anthropic/claude-opus-4-5#' "$P/.metaswarm/models.yaml"; rm -f "$P/.metaswarm/models.yaml.bak"
+run generate --host opencode
+[ "$RC" = "1" ] && has "hand-edited" && has "adversarial-reviewer.md" && pass "hand-edited orphan refused, exit 1" || fail "hand-edited orphan: rc=$RC $OUT"
+grep -q '^my tweak$' "$(oc_file adversarial-reviewer)" && pass "hand-edited orphan kept" || fail "hand-edited orphan kept"
+grep -q '^model: anthropic/claude-sonnet-4-5$' "$(oc_file coder)" && pass "nothing written when an orphan is refused" || fail "nothing written when an orphan is refused"
+run generate --host opencode --force
+[ "$RC" = "0" ] && [ "$(oc_left)" = "coder.md " ] && pass "--force removes the hand-edited orphan" || fail "--force orphan: rc=$RC $(oc_left)"
+grep -q '^model: anthropic/claude-opus-4-5$' "$(oc_file coder)" && pass "--force run writes the configured roles" || fail "--force run writes the configured roles"
+
+echo "Test 27: opencode value must be provider/model-id"
+oc_parse_case() { # desc, yaml value
+  new_proj none
+  printf 'roles:\n  coder:\n    opencode: %s\n' "$2" > "$P/.metaswarm/models.yaml"
+  run generate --host opencode
+  [ "$RC" = "2" ] && has "models.yaml:3:" && has "opencode" && [ ! -d "$P/.opencode" ] && pass "$1" || fail "$1 (rc=$RC out=$OUT)"
+}
+oc_parse_case "bare alias rejected" 'sonnet'
+oc_parse_case "quoted value with colon-space rejected" '"x: y"'
+oc_parse_case "value with a space rejected" 'openai/gpt 5'
+new_proj none
+printf 'roles:\n  coder:\n    opencode: "openrouter/anthropic/claude-3.7:beta"\n' > "$P/.metaswarm/models.yaml"
+run resolve coder opencode
+[ "$RC" = "0" ] && [ "$OUT" = "openrouter/anthropic/claude-3.7:beta" ] && pass "nested provider path with colon accepted" || fail "nested provider path: rc=$RC $OUT"
+
+echo "Test 28: --host argument surface"
+new_oc_proj
+run generate --hostile
+[ "$RC" = "0" ] && [ "$(count_agents)" = "8" ] && [ ! -e "$P/.opencode" ] && pass "generate --hostile is an ignored extra arg (default generate runs)" || fail "generate --hostile: rc=$RC $OUT"
+run generate foo
+[ "$RC" = "0" ] && [ ! -e "$P/.opencode" ] && pass "generate foo still runs the default generate" || fail "generate foo: rc=$RC $OUT"
+usage_case() { local d="$1"; shift; run "$@"; [ "$RC" = "64" ] && [ ! -e "$P/.opencode" ] && pass "$d" || fail "$d: rc=$RC $OUT"; }
+usage_case "--host=opencode form is a usage error" generate --host=opencode --host
+usage_case "--host claude is a usage error" generate --host claude
+usage_case "--host without a value is a usage error" generate --host
+usage_case "extra argument with --host is a usage error" generate --host opencode extra
+usage_case "check --host opencode --force is a usage error" check --host opencode --force
+usage_case "clean --host opencode --force is a usage error" clean --force --host opencode
+
 echo ""
 echo "Results: $PASS passed, $FAIL failed"
 DONE=1
