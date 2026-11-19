@@ -32,8 +32,5 @@ jobs:
       - name: Run metaswarm-usage tests with coverage
         run: bash tests/lib/coverage-gate.sh
 
-      - name: Run OpenCode V2 tests (config, plugin, MCP server)
-        run: bash tests/test-opencode-v2.sh
-
       - name: Verify co-located resources are in sync
         run: node lib/sync-resources.js --check

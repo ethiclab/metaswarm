@@ -1,9 +1,0 @@
-{
-  "name": "brainstorm",
-  "description": "Structured brainstorming with design review gate trigger",
-  "version": "1.0.0",
-  "author": "metaswarm",
-  "entryPoint": "brainstorm.md",
-  "commands": ["/brainstorm"],
-  "autoActivate": false
-}

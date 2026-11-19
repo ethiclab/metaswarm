@@ -1,7 +1,7 @@
 {
   "name": "metaswarm",
   "version": "0.16.0",
-  "description": "Cross-platform installer for metaswarm — multi-agent orchestration for Claude Code, Codex CLI, Gemini CLI, and OpenCode",
+  "description": "Cross-platform installer for metaswarm — multi-agent orchestration for Claude Code, Codex CLI, and Gemini CLI",
   "bin": {
     "metaswarm": "cli/metaswarm.js"
   },
@@ -23,14 +23,10 @@
     "GEMINI.md",
     "gemini-extension.json"
   ],
-  "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.0.0"
-  },
   "keywords": [
     "claude-code",
     "codex-cli",
     "gemini-cli",
-    "opencode",
     "agents",
     "orchestration",
     "tdd",

@@ -71,7 +71,6 @@ if [ "$new_project" = false ] && [ "$legacy_install" = false ]; then
   case "$METASWARM_PLATFORM" in
     codex) instruction_file="AGENTS.md" ;;
     gemini) instruction_file="GEMINI.md" ;;
-    opencode) instruction_file=".opencode/OPENCODE.md" ;;
     *) instruction_file="CLAUDE.md" ;;
   esac
 
@@ -79,10 +78,6 @@ if [ "$new_project" = false ] && [ "$legacy_install" = false ]; then
     needs_heal=true
   fi
   if [ ! -f ".coverage-thresholds.json" ]; then
-    needs_heal=true
-  fi
-  if { [ "$METASWARM_PLATFORM" = "opencode" ] || [ "$METASWARM_PLATFORM" = "all" ]; } \
-    && [ ! -f "opencode.json" ]; then
     needs_heal=true
   fi
   # A Go project's enforcement command runs the gate program (#87). If only the
@@ -146,10 +141,6 @@ case "$METASWARM_PLATFORM" in
     setup_cmd='/metaswarm:setup'
     start_cmd='/metaswarm:start-task'
     migrate_cmd='/metaswarm:migrate'
-    ;;
-  opencode)
-    setup_cmd='npx metaswarm setup --opencode'
-    start_cmd='/start-task'
     ;;
 esac
 

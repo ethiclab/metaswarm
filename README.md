@@ -224,11 +224,10 @@ This means the knowledge base can grow to hundreds or thousands of entries witho
 | [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | Plugin marketplace | `/start-task`, `/setup`, etc. |
 | [Gemini CLI](https://github.com/google-gemini/gemini-cli) | Extension (`gemini extensions install`) | `/metaswarm:start-task`, etc. |
 | [Codex CLI](https://github.com/openai/codex) | Plugin marketplace | `$start`, `$setup`, etc. |
-| [OpenCode](https://opencode.ai) | Static config (`.opencode/`) | `opencode run` |
 
 ## Requirements
 
-- One of: Claude Code, Gemini CLI, Codex CLI, or OpenCode
+- One of: Claude Code, Gemini CLI, or Codex CLI
 - Node.js 18+ (for automation scripts; contributing to metaswarm itself needs Node.js 22.8+ for the coverage gate)
 - [BEADS](https://github.com/steveyegge/beads) CLI (`bd`) — for task tracking (recommended). Minimum versions: bd ≥ 1.0.4 (tested with 1.3.4); the beads plugin version matching your bd; Dolt ≥ 2.4.0 only for server mode (`bd init --server`)
 - GitHub CLI (`gh`) — for PR automation (recommended)
